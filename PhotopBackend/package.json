@@ -1,0 +1,27 @@
+{
+  "name": "photop-backend",
+  "version": "1.0.0",
+  "description": "Photop Revival Backend API and WebSocket Gateway",
+  "main": "dist/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "admin": "tsx src/admin.ts",
+    "test": "tsx src/test.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  photop:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: photop-revival
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./PhotopBackend/data:/app/PhotopBackend/data
+      - ./PhotopBackend/media:/app/PhotopBackend/media
+    env_file:
+      - ./PhotopBackend/.env
+    environment:
+      - PORT=3000
+      - NODE_ENV=production

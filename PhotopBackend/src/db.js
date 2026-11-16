@@ -1,0 +1,17 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.db = void 0;
+var node_sqlite_1 = require("node:sqlite");
+var node_path_1 = require("node:path");
+var node_fs_1 = require("node:fs");
+var dataDir = node_path_1.default.resolve(process.cwd(), "data");
+if (!node_fs_1.default.existsSync(dataDir)) {
+    node_fs_1.default.mkdirSync(dataDir, { recursive: true });
+}
+var dbPath = node_path_1.default.join(dataDir, "photop.sqlite");
+exports.db = new node_sqlite_1.DatabaseSync(dbPath);
+// Enable WAL mode for high performance concurrency
+exports.db.exec("PRAGMA journal_mode = WAL;");
+exports.db.exec("PRAGMA foreign_keys = ON;");
+// Initialize tables
+exports.db.exec("\nCREATE TABLE IF NOT EXISTS users (\n  id TEXT PRIMARY KEY,\n  user TEXT NOT NULL UNIQUE,\n  user_lower TEXT NOT NULL UNIQUE,\n  email TEXT NOT NULL UNIQUE,\n  password_hash TEXT NOT NULL,\n  role TEXT NOT NULL DEFAULT 'User',\n  creation_time INTEGER NOT NULL,\n  set_location TEXT,\n  settings TEXT NOT NULL DEFAULT '{}',\n  profile_data TEXT NOT NULL DEFAULT '{}',\n  blocked_users TEXT NOT NULL DEFAULT '[]',\n  status TEXT NOT NULL DEFAULT 'active',\n  ban_data TEXT,\n  delete_timeframe INTEGER\n);\n\nCREATE TABLE IF NOT EXISTS posts (\n  id TEXT PRIMARY KEY,\n  user_id TEXT NOT NULL,\n  text TEXT NOT NULL,\n  timestamp INTEGER NOT NULL,\n  likes INTEGER NOT NULL DEFAULT 0,\n  quotes INTEGER NOT NULL DEFAULT 0,\n  chats INTEGER NOT NULL DEFAULT 0,\n  media TEXT,\n  configuration TEXT DEFAULT '[]',\n  deleted INTEGER NOT NULL DEFAULT 0,\n  FOREIGN KEY (user_id) REFERENCES users(id)\n);\n\nCREATE INDEX IF NOT EXISTS idx_posts_timestamp ON posts(timestamp DESC);\nCREATE INDEX IF NOT EXISTS idx_posts_user ON posts(user_id, timestamp DESC);\n\nCREATE TABLE IF NOT EXISTS chats (\n  id TEXT PRIMARY KEY,\n  post_id TEXT NOT NULL,\n  user_id TEXT NOT NULL,\n  text TEXT NOT NULL,\n  timestamp INTEGER NOT NULL,\n  reply_id TEXT,\n  hidden INTEGER NOT NULL DEFAULT 0,\n  FOREIGN KEY (post_id) REFERENCES posts(id),\n  FOREIGN KEY (user_id) REFERENCES users(id)\n);\n\nCREATE INDEX IF NOT EXISTS idx_chats_post_time ON chats(post_id, timestamp ASC);\n\nCREATE TABLE IF NOT EXISTS likes (\n  id TEXT PRIMARY KEY,\n  post_id TEXT NOT NULL,\n  user_id TEXT NOT NULL,\n  timestamp INTEGER NOT NULL,\n  FOREIGN KEY (post_id) REFERENCES posts(id),\n  FOREIGN KEY (user_id) REFERENCES users(id)\n);\n\nCREATE INDEX IF NOT EXISTS idx_likes_post ON likes(post_id);\nCREATE INDEX IF NOT EXISTS idx_likes_user ON likes(user_id, timestamp DESC);\n\nCREATE TABLE IF NOT EXISTS follows (\n  follower_id TEXT NOT NULL,\n  target_id TEXT NOT NULL,\n  timestamp INTEGER NOT NULL,\n  PRIMARY KEY (follower_id, target_id),\n  FOREIGN KEY (follower_id) REFERENCES users(id),\n  FOREIGN KEY (target_id) REFERENCES users(id)\n);\n\nCREATE INDEX IF NOT EXISTS idx_follows_target ON follows(target_id, timestamp DESC);\nCREATE INDEX IF NOT EXISTS idx_follows_follower ON follows(follower_id, timestamp DESC);\n\nCREATE TABLE IF NOT EXISTS sessions (\n  token TEXT PRIMARY KEY,\n  user_id TEXT NOT NULL,\n  ip TEXT NOT NULL,\n  last_visit INTEGER NOT NULL,\n  expires_at INTEGER NOT NULL,\n  FOREIGN KEY (user_id) REFERENCES users(id)\n);\n\nCREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);\n\nCREATE TABLE IF NOT EXISTS ban_appeals (\n  id TEXT PRIMARY KEY,\n  user_id TEXT NOT NULL,\n  appeal TEXT NOT NULL,\n  timestamp INTEGER NOT NULL,\n  FOREIGN KEY (user_id) REFERENCES users(id)\n);\n");
