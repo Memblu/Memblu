@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { generateId } from "../auth.js";
 import { UserRecord, ChatRecord } from "../types.js";
+import { notifyChatCreated, notifyChatLiked, notifyChatUnliked } from "../notifications.js";
 
 export function handleConnectLiveChat(
   body: any,
@@ -115,6 +116,13 @@ export function handleCreateChat(
   }
 
   broadcastChat(PostID, newChat, author, replyData);
+  notifyChatCreated({
+    actorId: currentUser.id,
+    chatId,
+    postId: PostID,
+    text: Text.trim(),
+    replyId: ReplyID || null
+  });
 
   return { Code: 200 };
 }
@@ -202,6 +210,7 @@ export function handleLikeChat(body: any, currentUser: UserRecord | null, broadc
 
   const likes = getChatLikeCount(ChatID);
   if (broadcastLikes) broadcastLikes(ChatID, chat.post_id, likes, currentUser.id, true);
+  notifyChatLiked({ actorId: currentUser.id, chatId: ChatID });
 
   return { Code: 200, ChatID, PostID: chat.post_id, Likes: likes, IsLiked: true };
 }
@@ -226,6 +235,7 @@ export function handleUnlikeChat(body: any, currentUser: UserRecord | null, broa
 
   const likes = getChatLikeCount(ChatID);
   if (broadcastLikes) broadcastLikes(ChatID, chat.post_id, likes, currentUser.id, false);
+  notifyChatUnliked({ actorId: currentUser.id, chatId: ChatID });
 
   return { Code: 200, ChatID, PostID: chat.post_id, Likes: likes, IsLiked: false };
 }

@@ -1,12 +1,14 @@
 {
+    "id": "/",
     "name": "Memblu",
     "short_name": "Memblu",
-    "start_url": "/?source=pwa",
-    "theme_color": "#5ab7fa",
-    "background_color": "#151617",
     "description": "Browse posts made by users and chat your thoughts live with others.",
-    "orientation": "portrait",
+    "start_url": "/?source=pwa",
+    "scope": "/",
     "display": "standalone",
+    "orientation": "portrait-primary",
+    "theme_color": "#7DCBFF",
+    "background_color": "#151617",
     "categories": [
         "social",
         "hangout",
@@ -15,12 +17,24 @@
     ],
     "icons": [
         {
+            "src": "./Images/ChillPhotopIcon.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "./Images/ChillPhotopIcon192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
             "src": "./Images/SquarePhotopIcon.png",
             "sizes": "256x256",
-            "type": "image/png"
+            "type": "image/png",
+            "purpose": "any"
         }
     ],
     "screenshots": [],
-    "shortcuts": [],
-    "scope": "/"
+    "shortcuts": []
 }

@@ -191,6 +191,7 @@ function ConnectToBridge() {
         if (Data.Code == 200) {
           Connected = true;
           HideLoading();
+          setTimeout(ReportVisibility, 0);
           if (GetAuthToken() != null) {
             SendRequest("GetAccountData", {}, function (Metadata, Data) {
               if (Data.Code == 200) {
@@ -231,6 +232,20 @@ function ConnectToBridge() {
     LastPong = Date.now();
     Socket = null;
     ConnectToBridge();
+  }
+
+  // Tell the server whether this client is actually visible so backgrounded
+  // tabs do not suppress push notifications.
+  function ReportVisibility() {
+    if (Socket != null && Socket.readyState === Socket.OPEN) {
+      SendRequest("UpdateVisibility", { Visible: !document.hidden }, function () { });
+    }
+  }
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", ReportVisibility);
+    window.addEventListener("focus", ReportVisibility);
+    window.addEventListener("blur", ReportVisibility);
+    window.addEventListener("pagehide", ReportVisibility);
   }
 
   /*
@@ -373,9 +388,16 @@ function AuthUpdate(IsAuth) {
 
     setCSS(LogoutButton, "display", "flex");
     setCSS(PostNavButton, "display", "flex");
+    setCSS(NotificationsButton, "display", "flex");
     setCSS(YourProfileButton, "display", "flex");
     setCSS(SettingsButton, "display", "flex");
     setCSS(AdminPanelButton, "display", HasAdminAccess(LoginUserRole) == true ? "flex" : "none");
+    if (typeof RefreshNotificationBadge == "function") {
+      RefreshNotificationBadge();
+    }
+    if (typeof SetupPwaInstallPrompt == "function") {
+      SetupPwaInstallPrompt();
+    }
     find("CreatePostUser").textContent = Username;
     find("CreatePostUser").setAttribute("title", "Signed In as " + Username);
     setCSS("CreatePostProfilePic", "content", "url('" + GoogleCloudStorgeURL + "ProfileImages/" + (Settings.ProfilePic || "DefaultProfilePic") + "')");
@@ -400,9 +422,13 @@ function AuthUpdate(IsAuth) {
 
     setCSS(LogoutButton, "display", "none");
     setCSS(PostNavButton, "display", "none");
+    setCSS(NotificationsButton, "display", "none");
     setCSS(YourProfileButton, "display", "none");
     setCSS(SettingsButton, "display", "none");
     setCSS(AdminPanelButton, "display", "none");
+    if (typeof SetNotificationBadge == "function") {
+      SetNotificationBadge(0);
+    }
     find("CreatePostUser").textContent = "Signed Out";
     find("CreatePostUser").setAttribute("title", "Signed Out");
     UpdatePostCharTextCounter(0);
@@ -2641,6 +2667,18 @@ function ChatUpdated(Metadata, Body) {
   }
   if (typeof UpdateRenderedChatText == "function") {
     UpdateRenderedChatText(Body.ChatID, Body.Text);
+  }
+}
+
+function NotificationReceived(Metadata, Body) {
+  if (Body == null) {
+    return;
+  }
+  if (Body.Unread != null && typeof SetNotificationBadge == "function") {
+    SetNotificationBadge(Body.Unread);
+  }
+  if (typeof HandleRealtimeNotification == "function") {
+    HandleRealtimeNotification(Body.Notification);
   }
 }
 

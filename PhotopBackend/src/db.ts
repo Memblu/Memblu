@@ -155,6 +155,45 @@ CREATE TABLE IF NOT EXISTS admin_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_admin_log_time ON admin_log(timestamp DESC);
+
+-- In-app notifications. Rows are grouped per target so high volume events
+-- (likes, chat activity) collapse into one entry with a count instead of
+-- flooding the feed. The actors column keeps recent participants for display.
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  recipient_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  actor_id TEXT,
+  post_id TEXT,
+  chat_id TEXT,
+  group_key TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 1,
+  actors TEXT NOT NULL DEFAULT '[]',
+  action TEXT,
+  reason TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  read INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (recipient_id) REFERENCES users(id),
+  FOREIGN KEY (actor_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedupe ON notifications(recipient_id, type, group_key);
+
+-- One row per browser/device. A user can have several active devices.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
 `);
 
 // Custom profile URLs (an alternative to sharing the user's opaque ID).
@@ -200,4 +239,11 @@ for (const [column, sql] of appealMigrations) {
   if (!appealColumns.some(c => c.name === column)) {
     db.exec(sql);
   }
+}
+
+// Notifications are pruned on startup and daily: read entries are kept for a
+// month, anything else for three months, then removed by the maintenance job.
+const notificationColumns = db.prepare("PRAGMA table_info(notifications)").all() as Array<{ name: string }>;
+if (!notificationColumns.some(c => c.name === "actors")) {
+  db.exec("ALTER TABLE notifications ADD COLUMN actors TEXT NOT NULL DEFAULT '[]';");
 }

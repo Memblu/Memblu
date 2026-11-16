@@ -1,5 +1,6 @@
 import { db } from "../db.js";
 import { UserRecord, PostRecord, ChatRecord, LikeRecord } from "../types.js";
+import { notifyNewFollower } from "../notifications.js";
 import { handleGetPosts } from "./postHandlers.js";
 import { formatChatResponse } from "./chatHandlers.js";
 
@@ -107,6 +108,8 @@ export function handleFollowUser(body: any, currentUser: UserRecord | null): any
     const pd = JSON.parse(currentUser.profile_data || "{}");
     pd.Following = (pd.Following || 0) + 1;
     db.prepare("UPDATE users SET profile_data = ? WHERE id = ?").run(JSON.stringify(pd), currentUser.id);
+
+    notifyNewFollower({ actorId: currentUser.id, targetId: FollowUserID });
   }
 
   return { Code: 200 };

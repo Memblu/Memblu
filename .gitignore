@@ -1,0 +1,22 @@
+# ── Environment & secrets ──────────────────────────────────────────────────────
+.env
+*.env.local
+*.sqlite
+
+# ── Runtime data (not committed – back up separately) ─────────────────────────
+data/*
+data/
+media/
+
+# ── Build output ──────────────────────────────────────────────────────────────
+dist/
+
+# ── Node ──────────────────────────────────────────────────────────────────────
+node_modules/
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

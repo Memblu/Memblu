@@ -1,8 +1,10 @@
 # ── Environment & secrets ──────────────────────────────────────────────────────
 .env
 *.env.local
+*.sqlite
 
 # ── Runtime data (not committed – back up separately) ─────────────────────────
+data/*
 data/
 media/
 

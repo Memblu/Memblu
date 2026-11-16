@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { generateId } from "../auth.js";
 import { UserRecord, PostRecord } from "../types.js";
+import { notifyPostCreated, notifyPostLiked, notifyPostUnliked } from "../notifications.js";
 
 export function handleGetPosts(body: any, currentUser: UserRecord | null): any {
   const { LookupID, Amount = 15, Before, FromUserID, ExcludePinned } = body;
@@ -153,6 +154,7 @@ export function handleCreatePost(
   };
 
   broadcastNewPost(post, author);
+  notifyPostCreated({ actorId: currentUser.id, postId: newPostId, text: Text || "" });
 
   return {
     Code: 200,
@@ -271,6 +273,7 @@ export function handleLikePost(body: any, currentUser: UserRecord | null, broadc
 
   const likes = getPostLikeCount(PostID);
   if (broadcastLikes) broadcastLikes(PostID, likes, currentUser.id, true);
+  notifyPostLiked({ actorId: currentUser.id, postId: PostID });
 
   return { Code: 200, PostID, Likes: likes, IsLiked: true };
 }
@@ -292,6 +295,7 @@ export function handleUnlikePost(body: any, currentUser: UserRecord | null, broa
 
   const likes = getPostLikeCount(PostID);
   if (broadcastLikes) broadcastLikes(PostID, likes, currentUser.id, false);
+  notifyPostUnliked({ actorId: currentUser.id, postId: PostID });
 
   return { Code: 200, PostID, Likes: likes, IsLiked: false };
 }

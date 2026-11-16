@@ -487,6 +487,65 @@ RefreshHomeButton.onclick = function () {
   MobileCloseNavButtons();
 }
 
+var UnreadNotificationCount = 0;
+var NotificationsButton = CreateSideButton("NotificationsButton", "Notifications", "View Notifications", '<svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg"> <path d="M64 104C64 68.654 92.654 40 128 40C163.346 40 192 68.654 192 104V152L216 184H40L64 152V104Z" stroke="' + ThemeColor + '" stroke-width="20"/> <path d="M102 212C102 226.359 113.641 238 128 238C142.359 238 154 226.359 154 212" stroke="' + ThemeColor + '" stroke-width="20"/> </svg>');
+createElement("NotificationsBadge", "div", NotificationsButton, [
+  ["position", "absolute"],
+  ["display", "none"],
+  ["top", "5px"],
+  ["right", "5px"],
+  ["min-width", "22px"],
+  ["height", "22px"],
+  ["padding-left", "4px"],
+  ["padding-right", "4px"],
+  ["box-sizing", "border-box"],
+  ["background-color", "#FF4174"],
+  ["border-radius", "11px"],
+  ["z-index", "2"],
+
+  // Text:
+  ["font-size", "13px"],
+  ["line-height", "22px"],
+  ["font-family", FontTypeA],
+  ["font-weight", "900"],
+  ["color", "#ffffff"],
+  ["text-align", "center"]
+]);
+function SetNotificationBadge(Count) {
+  UnreadNotificationCount = Number(Count) || 0;
+  var Badge = find("NotificationsBadge");
+  if (Badge == null) {
+    return;
+  }
+  if (UnreadNotificationCount > 0) {
+    Badge.textContent = UnreadNotificationCount > 99 ? "99+" : String(UnreadNotificationCount);
+    setCSS(Badge, "display", "block");
+  } else {
+    Badge.textContent = "";
+    setCSS(Badge, "display", "none");
+  }
+}
+function RefreshNotificationBadge() {
+  if (typeof SendRequest != "function" || UserID == null) {
+    SetNotificationBadge(0);
+    return;
+  }
+  SendRequest("GetNotificationCount", {}, function (Metadata, Data) {
+    if (Data != null && Data.Code == 200) {
+      SetNotificationBadge(Data.Unread);
+    }
+  });
+}
+NotificationsButton.onclick = function () {
+  if (UserID == null) {
+    ShowPopUp("It's Better Together", "Join the hangout today! You must <b>sign in</b> or <b>sign up</b> before being able to view your <b>notifications</b>!", [ ["Sign In", ThemeColor, "StartSignIn"], ["Sign Up", "#2AF5B5", "StartSignUp"], ["Later", "#B3B3B3", null] ]);
+  } else {
+    SwitchPage("Notifications");
+    loadScript(LoadScripts.Notifications);
+  }
+  MobileCloseNavButtons();
+}
+
 var PostNavButton = CreateSideButton("PostHomeButton", "Post", "Create Post", '<svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg"> <path d="M235 158.988H172.506C164.774 158.988 158.506 165.256 158.506 172.988V235C158.506 238.314 155.82 241 152.506 241H101.529C98.2156 241 95.5293 238.314 95.5293 235V172.988C95.5293 165.256 89.2613 158.988 81.5293 158.988H20C16.6863 158.988 14 156.302 14 152.988V102.012C14 98.698 16.6863 96.0117 20 96.0117H81.5293C89.2613 96.0117 95.5293 89.7437 95.5293 82.0117V20C95.5293 16.6863 98.2156 14 101.529 14H152.506C155.82 14 158.506 16.6863 158.506 20V82.0117C158.506 89.7437 164.774 96.0117 172.506 96.0117H235C238.314 96.0117 241 98.698 241 102.012V152.988C241 156.302 238.314 158.988 235 158.988Z" stroke="' + ThemeColor + '" stroke-width="20"/> </svg>');
 PostNavButton.onclick = function () {
   if (CurrentPage != "Home") {
@@ -854,6 +913,12 @@ async function SwitchPage(Page, BypassCurrent) {
       CreatePostDisplay();
     }
     ViewingProfileID = null;
+  } else if (Page == "Notifications") {
+    setCSS("LoginForm", "visibility", "hidden");
+    setCSS("LoginForm", "position", "absolute");
+    setCSS("CreatePost", "visibility", "hidden");
+    setCSS("CreatePost", "position", "absolute");
+    setCSS("ViewRefreshBar", "display", "none");
   }
   return true;
 }

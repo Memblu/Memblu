@@ -69,6 +69,8 @@ function cleanupTestData(): void {
       reportParams.push(...ids);
       run("reports", `DELETE FROM reports WHERE ${reportClauses.join(" OR ")}`, reportParams);
 
+      run("push_subscriptions", `DELETE FROM push_subscriptions WHERE user_id IN (${ph})`, ids);
+      run("notifications", `DELETE FROM notifications WHERE recipient_id IN (${ph}) OR actor_id IN (${ph})`, [...ids, ...ids]);
       run("admin_log", `DELETE FROM admin_log WHERE actor_id IN (${ph})`, ids);
       run("users", `DELETE FROM users WHERE id IN (${ph})`, ids);
 
@@ -834,6 +836,37 @@ async function runTests() {
   const clearedProfile = await sendReq("GetProfile", { ProfileUserID: customSlug }, owner.token, owner.id);
   assert.strictEqual(clearedProfile.Code, 404, "Cleared custom URLs should stop resolving");
   console.log("✔ Custom profile URLs verified");
+
+  // 26. Notifications: liking a post notifies its author, and read state updates.
+  const notifPost = await sendReq("CreatePost", { Text: "Notification test post", Media: [] }, owner.token, owner.id);
+  assert.strictEqual(notifPost.Code, 200, "Notification test post should be created");
+  const notifPostID = notifPost.NewPostID;
+  const likeForNotif = await sendReq("LikePost", { PostID: notifPostID }, moderator.token, moderator.id);
+  assert.strictEqual(likeForNotif.Code, 200, "Moderator should be able to like the post");
+
+  const notifFeed = await sendReq("GetNotifications", { Amount: 20 }, owner.token, owner.id);
+  assert.strictEqual(notifFeed.Code, 200, "Owner should be able to load notifications");
+  assert.ok(Array.isArray(notifFeed.Notifications), "Notifications should be an array");
+  const likeNotif = notifFeed.Notifications.find((n: any) => n.Type === "LikePost" && n.PostID === notifPostID);
+  assert.ok(likeNotif, "A LikePost notification should be created for the author");
+  assert.strictEqual(likeNotif.Read, false, "The notification should start unread");
+  assert.ok((notifFeed.Unread || 0) >= 1, "Unread count should reflect the new notification");
+
+  const markRead = await sendReq("MarkNotificationsRead", { NotificationIDs: [likeNotif._id] }, owner.token, owner.id);
+  assert.strictEqual(markRead.Code, 200, "Marking a notification read should succeed");
+  assert.strictEqual(markRead.Unread, notifFeed.Unread - 1, "Unread count should decrement after marking read");
+
+  const afterRead = await sendReq("GetNotifications", { Amount: 20 }, owner.token, owner.id);
+  const readNotif = afterRead.Notifications.find((n: any) => n._id === likeNotif._id);
+  assert.strictEqual(readNotif.Read, true, "The notification should now be read");
+
+  // Unliking removes the grouped notification once no actors remain.
+  const unlikeForNotif = await sendReq("UnlikePost", { PostID: notifPostID }, moderator.token, moderator.id);
+  assert.strictEqual(unlikeForNotif.Code, 200, "Moderator should be able to unlike the post");
+  const afterUnlike = await sendReq("GetNotifications", { Amount: 20 }, owner.token, owner.id);
+  const removedNotif = afterUnlike.Notifications.find((n: any) => n._id === likeNotif._id);
+  assert.strictEqual(removedNotif, undefined, "The grouped notification should be removed after the last unlike");
+  console.log("✔ Notifications verified");
 
   ws.close();
   cleanupTestData();

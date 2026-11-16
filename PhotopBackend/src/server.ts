@@ -5,6 +5,7 @@ import fs from "node:fs";
 import multer from "multer";
 import { createWebSocketServer } from "./wsServer.js";
 import { validateSession } from "./auth.js";
+import { getVapidPublicKey } from "./notifications.js";
 import { mediaDir, savePostImage, saveProfileImage, saveProfileBanner, getMediaContentType } from "./media.js";
 
 // Load .env file if present
@@ -74,7 +75,9 @@ app.get("/config.js", (req, res) => {
     imageUploadDomain: `${proto}://${host}/ImageUpload`,
     mediaUrl: `${proto}://${host}/media/`,
     bypassCaptcha,
-    hCaptchaSiteKey
+    hCaptchaSiteKey,
+    // Empty when VAPID keys are not configured; the client disables push then.
+    vapidPublicKey: getVapidPublicKey()
   };
 
   res.setHeader("Content-Type", "application/javascript");

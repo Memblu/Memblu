@@ -88,3 +88,57 @@ export interface SessionRecord {
   last_visit: number;
   expires_at: number;
 }
+
+export type NotificationType =
+  | "LikePost"
+  | "QuotePost"
+  | "ChatPost"
+  | "ModeratePost"
+  | "LikeChat"
+  | "ReplyChat"
+  | "QuoteChat"
+  | "ModerateChat"
+  | "MentionPost"
+  | "MentionChat"
+  | "NewPost"
+  | "Follow"
+  | "ThreadActivity";
+
+export interface NotificationRecord {
+  id: string;
+  recipient_id: string;
+  type: NotificationType;
+  actor_id?: string | null;
+  post_id?: string | null;
+  chat_id?: string | null;
+  group_key: string;
+  count: number;
+  actors?: string | null; // JSON array of actor user IDs
+  action?: string | null; // moderation action (Removed etc.)
+  reason?: string | null; // moderation reason
+  created_at: number;
+  updated_at: number;
+  read: number; // 0 or 1
+}
+
+export interface PushSubscriptionRecord {
+  id: string;
+  user_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_agent?: string | null;
+  created_at: number;
+}
+
+export interface NotificationPreferences {
+  Likes: boolean;
+  Quotes: boolean;
+  Chats: boolean;
+  Replies: boolean;
+  Mentions: boolean;
+  Follows: boolean;
+  FollowedPosts: boolean;
+  ThreadActivity: boolean;
+  InstallPromptSeen: boolean;
+}

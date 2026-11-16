@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { generateId } from "../auth.js";
 import { UserRecord } from "../types.js";
+import { notifyContentModerated } from "../notifications.js";
 
 const VALID_ROLES = [
   "Owner",
@@ -668,7 +669,17 @@ export function handleAdminContentAction(body: any, currentUser: UserRecord | nu
     if (!result.DeletedPostIDs && !result.DeletedChatIDs) {
       return { Code: 404, Message: "Content not found." };
     }
-    logAdminAction(currentUser, type === "Post" ? "PostDeleted" : "ChatDeleted", id, {});
+    const reason = typeof body?.Reason === "string" && body.Reason.trim()
+      ? body.Reason.trim().slice(0, 500)
+      : "Removed by a moderator.";
+    notifyContentModerated({
+      targetType: type === "Chat" ? "Chat" : "Post",
+      targetId: id,
+      actorId: currentUser.id,
+      action: "Removed",
+      reason
+    });
+    logAdminAction(currentUser, type === "Post" ? "PostDeleted" : "ChatDeleted", id, { Reason: reason });
     return { Code: 200, ...result };
   }
 
@@ -765,6 +776,15 @@ export function handleAdminReports(body: any, currentUser: UserRecord | null): a
     const report = db.prepare("SELECT * FROM reports WHERE id = ?").get(reportId) as any;
     if (!report) return { Code: 404, Message: "Report not found." };
     const deletion = deleteContentByType(report.content_type, report.content_id);
+    if (report.content_type === "Post" || report.content_type === "Chat") {
+      notifyContentModerated({
+        targetType: report.content_type,
+        targetId: report.content_id,
+        actorId: currentUser.id,
+        action: "Removed",
+        reason: String(report.reason || "Removed after a report.").slice(0, 500)
+      });
+    }
     db.prepare(`
       UPDATE reports SET status = 'resolved', reviewed_by = ?, reviewed_at = ?, resolution_note = ? WHERE id = ?
     `).run(currentUser.id, Date.now(), "Content removed from report.", reportId);

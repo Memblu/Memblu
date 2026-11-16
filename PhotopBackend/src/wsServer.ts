@@ -53,6 +53,25 @@ import {
 } from "./handlers/moderationHandlers.js";
 import { handleLoadPlatformEmbeds } from "./handlers/embedHandlers.js";
 import {
+  handleGetNotifications,
+  handleGetNotificationCount,
+  handleMarkNotificationsRead,
+  handleMarkAllNotificationsRead,
+  handleGetNotificationSettings,
+  handleUpdateNotificationSettings,
+  handleMarkInstallPromptSeen,
+  handleSubscribePush,
+  handleUnsubscribePush,
+  handleGetPushStatus,
+  handleNotificationStats
+} from "./handlers/notificationHandlers.js";
+import {
+  configurePush,
+  setActiveUserChecker,
+  setNotificationBroadcaster,
+  startNotificationMaintenance
+} from "./notifications.js";
+import {
   handleAdminOverview,
   handleAdminGetUsers,
   handleAdminGetUser,
@@ -71,12 +90,50 @@ interface ExtendedSocket extends WebSocket {
   clientIp: string;
   subscribedRooms: Set<string>;
   userId?: string;
+  isVisible?: boolean;
+  lastActiveAt?: number;
 }
 
 export function createWebSocketServer(server: any) {
   const wss = new WebSocketServer({ server, path: "/Server1" });
   const allSockets = new Set<ExtendedSocket>();
   const roomSubscriptions = new Map<string, Set<ExtendedSocket>>();
+
+  configurePush();
+  startNotificationMaintenance();
+
+  // Realtime notifications follow the same server push convention as likes and
+  // chats: the client dispatches Body.ClientFunction by name.
+  setNotificationBroadcaster((userId: string, notification: any, unread: number) => {
+    const packet = JSON.stringify({
+      Metadata: { ReqSource: "Server" },
+      Body: {
+        ClientFunction: "NotificationReceived",
+        Notification: notification,
+        Unread: unread
+      }
+    });
+    for (const s of allSockets) {
+      if (s.userId === userId && s.readyState === WebSocket.OPEN) {
+        s.send(packet);
+      }
+    }
+  });
+
+  // A user with an open socket is already receiving the realtime packet, so the
+  // Web Push sender can skip their devices on that account.
+  setActiveUserChecker((userId: string) => {
+    const now = Date.now();
+    for (const s of allSockets) {
+      if (s.userId !== userId || s.readyState !== WebSocket.OPEN) continue;
+      // Only treat the user as active when a visible, recently active client
+      // is connected. Backgrounded/closed clients should still receive push.
+      if (s.isVisible === false) continue;
+      if (!s.lastActiveAt || now - s.lastActiveAt > 45000) continue;
+      return true;
+    }
+    return false;
+  });
 
   function getRoomCount(postId: string): number {
     return roomSubscriptions.get(postId)?.size || 0;
@@ -336,6 +393,8 @@ export function createWebSocketServer(server: any) {
 
   wss.on("connection", (socket: ExtendedSocket, req: IncomingMessage) => {
     socket.isAlive = true;
+    socket.isVisible = true;
+    socket.lastActiveAt = Date.now();
     socket.clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
     socket.subscribedRooms = new Set();
     allSockets.add(socket);
@@ -346,11 +405,14 @@ export function createWebSocketServer(server: any) {
 
     socket.on("close", () => {
       unsubscribeAll(socket);
+      allSockets.delete(socket);
     });
 
     socket.on("message", (raw) => {
       const msg = raw.toString();
       if (msg === "Ping") {
+        socket.isAlive = true;
+        socket.lastActiveAt = Date.now();
         socket.send("Pong");
         return;
       }
@@ -364,6 +426,13 @@ export function createWebSocketServer(server: any) {
 
       const { Metadata, Body } = packet;
       if (!Metadata || !Metadata.ReqTask) return;
+
+      if (Metadata.ReqTask === "UpdateVisibility") {
+        socket.isVisible = Body?.Visible !== false;
+        socket.lastActiveAt = Date.now();
+        socket.send(JSON.stringify({ Metadata: { ReqSource: "Server", SentMetadata: { ReqID: Metadata.ReqID } }, Body: { Code: 200 } }));
+        return;
+      }
 
       // Validate session if AuthToken is provided
       let currentUser: UserRecord | null = null;
@@ -547,6 +616,41 @@ export function createWebSocketServer(server: any) {
             break;
           case "AdminLog":
             result = handleAdminLog(currentUser);
+            break;
+
+          // Notifications & Web Push
+          case "GetNotifications":
+            result = handleGetNotifications(Body, currentUser);
+            break;
+          case "GetNotificationCount":
+            result = handleGetNotificationCount(currentUser);
+            break;
+          case "MarkNotificationsRead":
+            result = handleMarkNotificationsRead(Body, currentUser);
+            break;
+          case "MarkAllNotificationsRead":
+            result = handleMarkAllNotificationsRead(currentUser);
+            break;
+          case "GetNotificationSettings":
+            result = handleGetNotificationSettings(currentUser);
+            break;
+          case "UpdateNotificationSettings":
+            result = handleUpdateNotificationSettings(Body, currentUser);
+            break;
+          case "MarkInstallPromptSeen":
+            result = handleMarkInstallPromptSeen(currentUser);
+            break;
+          case "SubscribePush":
+            result = handleSubscribePush(Body, currentUser);
+            break;
+          case "UnsubscribePush":
+            result = handleUnsubscribePush(Body, currentUser);
+            break;
+          case "GetPushStatus":
+            result = handleGetPushStatus(currentUser);
+            break;
+          case "NotificationStats":
+            result = handleNotificationStats(currentUser);
             break;
 
           // Stubs for third-party embeds
