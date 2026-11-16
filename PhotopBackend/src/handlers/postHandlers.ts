@@ -93,7 +93,8 @@ export function handleGetPosts(body: any, currentUser: UserRecord | null): any {
     Quotes: p.quotes || 0,
     Chats: p.chats || 0,
     Media: p.media ? JSON.parse(p.media) : undefined,
-    Configuration: p.configuration ? JSON.parse(p.configuration) : []
+    Configuration: p.configuration ? JSON.parse(p.configuration) : [],
+    EditedAt: p.edited_at || null
   }));
 
   return {
@@ -160,8 +161,14 @@ export function handleCreatePost(
 }
 
 export type BroadcastDeletedPost = (postId: string) => void;
+export type BroadcastUpdatedPost = (postId: string, text: string, editedAt: number) => void;
 
-export function handleUpdatePost(body: any, currentUser: UserRecord | null, broadcastDeletedPost?: BroadcastDeletedPost): any {
+export function handleUpdatePost(
+  body: any,
+  currentUser: UserRecord | null,
+  broadcastDeletedPost?: BroadcastDeletedPost,
+  broadcastUpdatedPost?: BroadcastUpdatedPost
+): any {
   if (!currentUser) {
     return { Code: 401, Message: "Not authenticated." };
   }
@@ -174,6 +181,42 @@ export function handleUpdatePost(body: any, currentUser: UserRecord | null, broa
 
   const isAuthor = post.user_id === currentUser.id;
   const canMod = currentUser.role === "Owner" || currentUser.role === "Moderator";
+
+  if (Task === "Edit") {
+    // Only the author may rewrite their own words; moderators can delete but
+    // must not speak for someone else.
+    if (!isAuthor) {
+      return { Code: 403, Message: "You can only edit your own posts." };
+    }
+    if (post.deleted === 1) {
+      return { Code: 404, Message: "Post not found." };
+    }
+
+    const Text = typeof body.Text === "string" ? body.Text : null;
+    if (Text == null) {
+      return { Code: 400, Message: "Missing post text." };
+    }
+    let hasMedia = false;
+    try {
+      const media = post.media ? JSON.parse(post.media) : null;
+      hasMedia = !!(media && media.ImageCount);
+    } catch {
+      hasMedia = false;
+    }
+    if (!Text.trim() && !hasMedia) {
+      return { Code: 400, Message: "Post must have text or media." };
+    }
+    if (Text.length > 400) {
+      return { Code: 400, Message: "Posts can be up to 400 characters long." };
+    }
+
+    const editedAt = Date.now();
+    db.prepare("UPDATE posts SET text = ?, edited_at = ? WHERE id = ?").run(Text, editedAt, PostID);
+    if (broadcastUpdatedPost) {
+      broadcastUpdatedPost(PostID, Text, editedAt);
+    }
+    return { Code: 200, PostID, Text, EditedAt: editedAt };
+  }
 
   if (Task === "Delete") {
     if (!isAuthor && !canMod) {

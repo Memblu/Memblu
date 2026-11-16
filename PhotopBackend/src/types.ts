@@ -28,6 +28,7 @@ export interface UserRecord {
   id: string;
   user: string;
   user_lower: string;
+  custom_url?: string | null;
   email: string;
   password_hash: string;
   role: string; // JSON array or string
@@ -52,6 +53,7 @@ export interface PostRecord {
   media?: string | null; // JSON: { ImageCount: number }
   configuration?: string | null; // JSON: string[]
   deleted: number; // 0 or 1
+  edited_at?: number | null;
 }
 
 export interface ChatRecord {
@@ -63,6 +65,7 @@ export interface ChatRecord {
   reply_id?: string | null;
   hidden: number; // 0 or 1
   likes: number;
+  edited_at?: number | null;
 }
 
 export interface LikeRecord {

@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   user TEXT NOT NULL UNIQUE,
   user_lower TEXT NOT NULL UNIQUE,
+  custom_url TEXT,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'User',
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS posts (
   media TEXT,
   configuration TEXT DEFAULT '[]',
   deleted INTEGER NOT NULL DEFAULT 0,
+  edited_at INTEGER,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -62,6 +64,7 @@ CREATE TABLE IF NOT EXISTS chats (
   reply_id TEXT,
   hidden INTEGER NOT NULL DEFAULT 0,
   likes INTEGER NOT NULL DEFAULT 0,
+  edited_at INTEGER,
   FOREIGN KEY (post_id) REFERENCES posts(id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
@@ -154,11 +157,34 @@ CREATE TABLE IF NOT EXISTS admin_log (
 CREATE INDEX IF NOT EXISTS idx_admin_log_time ON admin_log(timestamp DESC);
 `);
 
+// Custom profile URLs (an alternative to sharing the user's opaque ID).
+// Existing databases predate the column, so add it when missing. NULL values
+// are allowed multiple times, so the unique index still permits users who have
+// not claimed a custom URL.
+const userColumns = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
+if (!userColumns.some(c => c.name === "custom_url")) {
+  db.exec("ALTER TABLE users ADD COLUMN custom_url TEXT;");
+}
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_custom_url ON users(custom_url COLLATE NOCASE);");
+
+// Posts edited after they were published carry a timestamp so clients can show
+// an "(edited)" marker without a separate lookup table.
+const postColumns = db.prepare("PRAGMA table_info(posts)").all() as Array<{ name: string }>;
+if (!postColumns.some(c => c.name === "edited_at")) {
+  db.exec("ALTER TABLE posts ADD COLUMN edited_at INTEGER;");
+}
+
 // Existing databases were created before chat likes existed, so add the column
 // (CREATE TABLE IF NOT EXISTS will not update an already-created table).
 const chatColumns = db.prepare("PRAGMA table_info(chats)").all() as Array<{ name: string }>;
 if (!chatColumns.some(c => c.name === "likes")) {
   db.exec("ALTER TABLE chats ADD COLUMN likes INTEGER NOT NULL DEFAULT 0;");
+}
+
+// Chats gained editing later than the original schema.
+const chatColumnsForEdit = db.prepare("PRAGMA table_info(chats)").all() as Array<{ name: string }>;
+if (!chatColumnsForEdit.some(c => c.name === "edited_at")) {
+  db.exec("ALTER TABLE chats ADD COLUMN edited_at INTEGER;");
 }
 
 // Older ban_appeals tables only stored the appeal text. The admin panel tracks

@@ -2,7 +2,7 @@
 var AboutText = [
   ['Title', 'PRIVACY NOTICE'],
   ['Paragraph', 'Last updated <b>October 16, 2021</b>'],
-  ['Paragraph', 'Thank you for choosing to be part of our community at Exotek LLC, doing business as Photop ("Photop", "we", "us", "our"). We are committed to protecting your personal information and your right to privacy. If you have any questions or concerns about this privacy notice, or our practices with regards to your personal information, please contact us at exotekservices@gmail.com.'],
+  ['Paragraph', 'Thank you for choosing to be part of our community at Exotek LLC, doing business as Memblu ("Memblu", "we", "us", "our"). We are committed to protecting your personal information and your right to privacy. If you have any questions or concerns about this privacy notice, or our practices with regards to your personal information, please contact us at exotekservices@gmail.com.'],
   ['Paragraph', 'When you visit our website <a style="color: #3D87FF" href="https://app.photop.live/">https://photop.live/</a> (the "Website"), and more generally, use any of our services (the "Services", which include the Website), we appreciate that you are trusting us with your personal information. We take your privacy very seriously. In this privacy notice, we seek to explain to you in the clearest way possible what information we collect, how we use it and what rights you have in relation to it. We hope you take some time to read through it carefully, as it is important. If there are any terms in this privacy notice that you do not agree with, please discontinue use of our Services immediately.'],
   ['Paragraph', 'This privacy notice applies to all information collected through our Services (which, as described above, includes our Website), as well as, any related services, sales, marketing or events.'],
   ['Paragraph', '<b>Please read this privacy notice carefully as it will help you understand what we do with the information that we collect.</b>'],
@@ -96,12 +96,12 @@ var AboutText = [
   ['Paragraph', '- Access your account settings and update your preferences.'],
 
   ['Title', '9. INTEGRATION OF THIRD PARTY APPS'],
-  ['Paragraph', "<b>In Short:</b> You may choose to connect your Photop account with a third party service. Doing so will make you subject to those service's privacy policy and terms of use agreement(s)."],
+  ['Paragraph', "<b>In Short:</b> You may choose to connect your Memblu account with a third party service. Doing so will make you subject to those service's privacy policy and terms of use agreement(s)."],
   ['Paragraph', "While setting up a profile, you may choose to add social connections to the following sites: Twitter, Google's YouTube, Amazon's Twitch, Discord, Facebook's Instagram, Reddit, Facebook, Pinterest, Byte Dance's TikTok, Microsoft's Xbox Live, and Microsoft's GitHub."],
-  ['Paragraph', "Upon verifying one or more of the aforementioned some of your user data will be received by Photop, including:"],
+  ['Paragraph', "Upon verifying one or more of the aforementioned some of your user data will be received by Memblu, including:"],
   ['Paragraph', '<b>Unique UserID.</b> We collect and store the unique UserID provided by a verifying party.'],
   ['Paragraph', '<b>Username.</b> We collect and store the account username provided by a verifying party.'],
-  ['Paragraph', "For example, when integrating/connecting a YouTube account, you are prompted to login with Google. After logging in and agreeing to the shared data we receive your <b>UserID</b> and <b>Username</b> which is then stored with your Photop account and displayed to others who visit your profile page."],
+  ['Paragraph', "For example, when integrating/connecting a YouTube account, you are prompted to login with Google. After logging in and agreeing to the shared data we receive your <b>UserID</b> and <b>Username</b> which is then stored with your Memblu account and displayed to others who visit your profile page."],
   ['Paragraph', "If wishing to remove the integration data, you can simply click the <i>Remove</i> button next to a social integration, the data will be instantaneously removed."],
 
   ['Title', '10. CONTROLS FOR DO-NOT-TRACK FEATURES'],

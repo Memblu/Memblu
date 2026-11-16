@@ -258,6 +258,96 @@ var SettingScreens = {
     });
 
     
+    var CustomURLHolder = createElement("CustomURLHolder", "div", SideBarSettingHolder, [
+        ["position", "relative"],
+        ["display", "inline-block"],
+        ["vertical-align", "top"],
+        ["background-color", ContentColor],
+        ["width", "calc(100% - 24px)"],
+        ["padding", "6px 6px 6px 6px"],
+        ["max-width", "300px"],
+        ["margin-top", "12px"],
+        ["border-radius", "12px"],
+        ["overflow-x", "auto"]
+    ]);
+
+    createElement("CustomURLBoxTitle", "div", CustomURLHolder, FieldTitleCSS).textContent = "Custom Profile URL";
+    createElement("CustomURLBoxDescription", "div", CustomURLHolder, [
+        ["position", "relative"],
+        ["margin-bottom", "6px"],
+
+        // Text:
+        ["font-size", "12px"],
+        ["font-family", FontTypeA],
+        ["font-weight", "400"],
+        ["color", "#bbbbbb"],
+        ["text-align", "left"],
+        ["overflow", "auto"]
+    ]).textContent = "Give people a memorable link instead of your user ID. Leave this empty and save to use your normal profile link again.";
+    var ChangeCustomURLBox = createElement("ChangeCustomURLBox", "input", CustomURLHolder, [
+        ["position", "relative"],
+        ["box-sizing", "border-box"],
+        ["border-width", "0px"],
+        ["background-color", ContentColorLayer3],
+        ["width", "100%"],
+        ["height", "41px"],
+        ["min-width", "150px"],
+        ["border-radius", "8px"],
+
+        // Text:
+        ["padding-left", "8px"],
+        ["font-size", "20px"],
+        ["font-family", FontTypeA],
+        ["font-weight", "900"],
+        ["color", FontColorA],
+        ["text-align", "left"],
+        ["overflow", "auto"]
+    ]);
+    ChangeCustomURLBox.placeholder = UserCustomURL || Username || "custom-url";
+    ChangeCustomURLBox.value = UserCustomURL || "";
+    ChangeCustomURLBox.setAttribute("title", "Custom Profile URL");
+    var CustomURLPreview = createElement("CustomURLPreview", "div", CustomURLHolder, [
+        ["position", "relative"],
+        ["margin-top", "6px"],
+
+        // Text:
+        ["font-size", "12px"],
+        ["font-family", FontTypeA],
+        ["font-weight", "400"],
+        ["color", ThemeColor],
+        ["text-align", "left"],
+        ["overflow-wrap", "break-word"],
+        ["overflow", "auto"]
+    ]);
+    function UpdateCustomURLPreview() {
+      CustomURLPreview.textContent = window.location.origin + window.location.pathname + "?user=" + (ChangeCustomURLBox.value.trim() || Username || UserID || "");
+    }
+    UpdateCustomURLPreview();
+    ChangeCustomURLBox.addEventListener("input", function() {
+      ChangeCustomURLBox.setAttribute("Edited", "true");
+      UpdateCustomURLPreview();
+    });
+    ChangeCustomURLBox.addEventListener("focusout", function() {
+      var NewURL = ChangeCustomURLBox.value.trim();
+      if (NewURL == (UserCustomURL || "")) {
+        ChangeCustomURLBox.removeAttribute("Edited");
+        UpdateCustomURLPreview();
+        return;
+      }
+      if (NewURL != "" && (NewURL.length < 3 || NewURL.length > 20 || NewURL.replace(/[^A-Za-z0-9_-]/g, "") != NewURL)) {
+        var SaveButton = find("SaveSettingsButton");
+        if (SaveButton != null) {
+          setCSS(SaveButton, "display", "none");
+        }
+        ShowPopUp("Invalid Profile URL!", "Profile URLs must be <b>3 to 20 characters</b> long and can only contain <b>letters</b>, <b>numbers</b>, <b>underscores</b> and <b>hyphens</b>.", [["Okay", "#618BFF", null]]);
+        return;
+      }
+      var SaveButton = find("SaveSettingsButton");
+      if (SaveButton != null) {
+        setCSS(SaveButton, "display", "flex");
+      }
+    });
+
     var ChangePasswordHolder = createElement("ChangeEmailHolder", "div", SideBarSettingHolder, [
         ["position", "relative"],
         ["display", "inline-block"],
@@ -1277,6 +1367,19 @@ SaveSettingsButton.onclick = async function() {
         ShowPopUp("Invalid Email", "Please enter a <b>valid email address</b> in case we need to contact you with any account issues.", [ ["Okay", "#618BFF", null] ]);
         return;
       }
+    }
+    var ChangeCustomURLBox = find("ChangeCustomURLBox");
+    if (ChangeCustomURLBox.hasAttribute("Edited")) {
+      var NewCustomURL = ChangeCustomURLBox.value.trim();
+      if (NewCustomURL != "" && (NewCustomURL.length < 3 || NewCustomURL.length > 20 || NewCustomURL.replace(/[^A-Za-z0-9_-]/g, "") != NewCustomURL)) {
+        setCSS(SaveSettingsButton, "display", "none");
+        ShowPopUp("Invalid Profile URL!", "Profile URLs must be <b>3 to 20 characters</b> long and can only contain <b>letters</b>, <b>numbers</b>, <b>underscores</b> and <b>hyphens</b>.", [["Okay", "#618BFF", null]]);
+        return;
+      }
+      SaveData.push({
+        Change: "CustomURL",
+        CustomURL: NewCustomURL
+      });
     }
     var OldPasswordBox = find("OldPasswordBox");
     if (OldPasswordBox.value != "") {

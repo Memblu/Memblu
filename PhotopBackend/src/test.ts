@@ -433,6 +433,91 @@ async function runTests() {
   assert.strictEqual(anonymousDenied.Code, 401, "Anonymous requests must not access the admin panel");
   console.log("✔ Admin access control verified");
 
+  // 14b. Test post editing: only the author may change the text, the change is
+  // persisted, and every client is told about it in real time.
+  const editPostRes = await sendReq("CreatePost", {
+    Text: "Original text before editing",
+    Media: {},
+    Configuration: []
+  }, token, userId);
+  assert.strictEqual(editPostRes.Code, 200, "Edit test post should be created");
+  const editPostId = editPostRes.NewPostID;
+
+  const editBroadcast = waitForBroadcast(
+    (body) => body.ClientFunction === "PostUpdated" && body.PostID === editPostId
+  );
+  const editRes = await sendReq("UpdatePost", {
+    Task: "Edit", PostID: editPostId, Text: "Edited text that every client receives"
+  }, token, userId);
+  assert.strictEqual(editRes.Code, 200, "Authors should be able to edit their own post");
+  assert.strictEqual(editRes.Text, "Edited text that every client receives");
+  assert.ok(editRes.EditedAt > 0, "Edits should record an edited timestamp");
+
+  const editPacket = await editBroadcast;
+  assert.strictEqual(editPacket.Text, "Edited text that every client receives", "Edit broadcast should carry the new text");
+  assert.strictEqual(editPacket.EditedAt, editRes.EditedAt, "Edit broadcast should carry the edited timestamp");
+  const editedLookup = await sendReq("GetPosts", { LookupID: editPostId }, token, userId);
+  assert.strictEqual(editedLookup.Posts[0].Text, "Edited text that every client receives", "Edited text should persist");
+  assert.strictEqual(editedLookup.Posts[0].EditedAt, editRes.EditedAt, "Edited timestamp should persist and be returned");
+
+  const foreignEdit = await sendReq("UpdatePost", {
+    Task: "Edit", PostID: editPostId, Text: "Someone else's words"
+  }, target.token, target.id);
+  assert.strictEqual(foreignEdit.Code, 403, "Non-authors must not edit a post");
+
+  const tooLongEdit = await sendReq("UpdatePost", {
+    Task: "Edit", PostID: editPostId, Text: "x".repeat(401)
+  }, token, userId);
+  assert.strictEqual(tooLongEdit.Code, 400, "Edits over 400 characters should be rejected");
+
+  const emptyEdit = await sendReq("UpdatePost", {
+    Task: "Edit", PostID: editPostId, Text: "   "
+  }, token, userId);
+  assert.strictEqual(emptyEdit.Code, 400, "Text-only posts must keep some text");
+
+  const deletedEdit = await sendReq("UpdatePost", {
+    Task: "Edit", PostID: postId, Text: "Editing something gone"
+  }, token, userId);
+  assert.strictEqual(deletedEdit.Code, 404, "Deleted posts must not be editable");
+  console.log("✔ Post editing verified");
+
+  // 14c. Test chat editing: the author can change a chat, the timestamp is
+  // recorded, and every client receives the updated text live.
+  const editChatBroadcast = waitForBroadcast(
+    (body) => body.ClientFunction === "ChatUpdated" && body.ChatID === parentChatID
+  );
+  const editChatRes = await sendReq("UpdateChat", {
+    Task: "Edit", ChatID: parentChatID, Text: "Edited chat text for everyone"
+  }, token, userId);
+  assert.strictEqual(editChatRes.Code, 200, "Authors should be able to edit their own chat");
+  assert.strictEqual(editChatRes.Text, "Edited chat text for everyone");
+  assert.ok(editChatRes.EditedAt > 0, "Chat edits should record a timestamp");
+
+  const editedChatPacket = await editChatBroadcast;
+  assert.strictEqual(editedChatPacket.Text, "Edited chat text for everyone", "Chat update broadcast should carry the new text");
+  assert.strictEqual(editedChatPacket.EditedAt, editChatRes.EditedAt, "Chat update broadcast should carry the timestamp");
+
+  const chatsAfterEdit = await sendReq("GetChats", { Post: postId, Amount: 25 }, token, userId);
+  const editedChat = chatsAfterEdit.Chats.find((c: any) => c._id === parentChatID);
+  assert.strictEqual(editedChat.Text, "Edited chat text for everyone", "Edited chat text should persist");
+  assert.strictEqual(editedChat.EditedAt, editChatRes.EditedAt, "Edited chat timestamp should be returned");
+
+  const foreignChatEdit = await sendReq("UpdateChat", {
+    Task: "Edit", ChatID: parentChatID, Text: "Someone else's words"
+  }, target.token, target.id);
+  assert.strictEqual(foreignChatEdit.Code, 403, "Non-authors must not edit a chat");
+
+  const longChatEdit = await sendReq("UpdateChat", {
+    Task: "Edit", ChatID: parentChatID, Text: "x".repeat(201)
+  }, token, userId);
+  assert.strictEqual(longChatEdit.Code, 400, "Chat edits over 200 characters should be rejected");
+
+  const emptyChatEdit = await sendReq("UpdateChat", {
+    Task: "Edit", ChatID: parentChatID, Text: "   "
+  }, token, userId);
+  assert.strictEqual(emptyChatEdit.Code, 400, "Chat edits cannot be empty");
+  console.log("✔ Chat editing verified");
+
   // 15. Test the overview payload (stats, 7 day activity, system info).
   const overviewRes = await sendReq("AdminOverview", {}, owner.token, owner.id);
   assert.strictEqual(overviewRes.Code, 200, "AdminOverview should return 200");
@@ -516,6 +601,11 @@ async function runTests() {
   }, owner.token, owner.id);
   assert.strictEqual(banRes.Code, 200, "Owners should be able to ban users");
   assert.strictEqual(banRes.BanTarget.UserID, target.id);
+  // Admin responses must not put the target in the top-level UserID field:
+  // clients treat that as the signed-in account and would drop the actor's
+  // session after the action.
+  assert.strictEqual(banRes.TargetUserID, target.id);
+  assert.strictEqual(banRes.UserID, undefined, "Admin responses must not echo a session UserID");
   assert.strictEqual(banRes.BanTarget.BanData.BanReason, "Admin panel test ban");
   assert.strictEqual(banRes.RevokeSessionsFor, target.id, "Banning should revoke the target's sessions");
   const banPacket = await banBroadcast;
@@ -704,6 +794,46 @@ async function runTests() {
   const moderatorLog = await sendReq("AdminLog", {}, moderator.token, moderator.id);
   assert.strictEqual(moderatorLog.Code, 200, "Moderators should be able to read the audit log");
   console.log("✔ Admin audit log verified");
+
+  // 25. Custom profile URLs replace the opaque user ID in shared links.
+  const customSlug = "cool_" + Math.floor(Math.random() * 100000);
+  const setCustomURL = await sendReq("UpdateAccountData", {
+    Update: [{ Change: "CustomURL", CustomURL: customSlug }]
+  }, owner.token, owner.id);
+  assert.strictEqual(setCustomURL.Code, 200, "Setting a custom profile URL should succeed");
+  assert.strictEqual(setCustomURL.CustomURL, customSlug, "Saved custom URL should be returned");
+
+  const bySlug = await sendReq("GetProfile", { ProfileUserID: customSlug.toUpperCase() }, owner.token, owner.id);
+  assert.strictEqual(bySlug.Code, 200, "GetProfile should resolve a custom profile URL");
+  assert.strictEqual(bySlug.UserInfo._id, owner.id, "Custom URL should resolve to the right account");
+  assert.strictEqual(bySlug.UserInfo.CustomURL, customSlug, "Profiles should expose the custom URL");
+
+  const byID = await sendReq("GetProfile", { ProfileUserID: owner.id }, owner.token, owner.id);
+  assert.strictEqual(byID.Code, 200, "The original user ID link should keep working");
+
+  const invalidSlug = await sendReq("UpdateAccountData", {
+    Update: [{ Change: "CustomURL", CustomURL: "no spaces!" }]
+  }, owner.token, owner.id);
+  assert.strictEqual(invalidSlug.Code, 400, "Invalid custom profile URLs should be rejected");
+
+  const takenSlug = await sendReq("UpdateAccountData", {
+    Update: [{ Change: "CustomURL", CustomURL: customSlug }]
+  }, moderator.token, moderator.id);
+  assert.strictEqual(takenSlug.Code, 409, "Duplicate custom profile URLs should be rejected");
+
+  const usernameSlug = await sendReq("UpdateAccountData", {
+    Update: [{ Change: "CustomURL", CustomURL: moderator.name }]
+  }, owner.token, owner.id);
+  assert.strictEqual(usernameSlug.Code, 409, "Custom URLs must not shadow other usernames");
+
+  const clearCustomURL = await sendReq("UpdateAccountData", {
+    Update: [{ Change: "CustomURL", CustomURL: "" }]
+  }, owner.token, owner.id);
+  assert.strictEqual(clearCustomURL.Code, 200, "Clearing the custom profile URL should succeed");
+  assert.strictEqual(clearCustomURL.CustomURL, null, "Clearing should return no custom URL");
+  const clearedProfile = await sendReq("GetProfile", { ProfileUserID: customSlug }, owner.token, owner.id);
+  assert.strictEqual(clearedProfile.Code, 404, "Cleared custom URLs should stop resolving");
+  console.log("✔ Custom profile URLs verified");
 
   ws.close();
   cleanupTestData();

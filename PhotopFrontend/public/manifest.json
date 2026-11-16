@@ -1,6 +1,6 @@
 {
-    "name": "Photop",
-    "short_name": "Photop",
+    "name": "Memblu",
+    "short_name": "Memblu",
     "start_url": "/?source=pwa",
     "theme_color": "#5ab7fa",
     "background_color": "#151617",
@@ -15,7 +15,7 @@
     ],
     "icons": [
         {
-            "src": "https://app.photop.live/Images/SquarePhotopIcon.png",
+            "src": "./Images/SquarePhotopIcon.png",
             "sizes": "256x256",
             "type": "image/png"
         }

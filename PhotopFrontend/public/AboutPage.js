@@ -1,7 +1,7 @@
 
 var AboutText = [
   ["Title", "Your Hangout"],
-  ["Paragraph", "Ever wanted a place to just hangout? Well with Photop this place is created!"],
+  ["Paragraph", "Ever wanted a place to just hangout? Well with Memblu this place is created!"],
 
   ["Title", "It Just Takes a Post..."],
   ["Paragraph", "All it takes is a post, and from their the conversation is started. Start a conversation about anything ranging from video games to anime. We won't judge!"],

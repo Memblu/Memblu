@@ -451,7 +451,9 @@ export function handleAdminUpdateUser(body: any, currentUser: UserRecord | null)
     }
     db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, target.id);
     logAdminAction(currentUser, "RoleChanged", target.user, { From: target.role, To: role });
-    return { Code: 200, UserID: target.id, Role: role };
+    // Respond with TargetUserID rather than UserID: clients treat a top-level
+    // UserID as the signed-in account and would switch identity mid-session.
+    return { Code: 200, TargetUserID: target.id, Role: role };
   }
 
   if (task === "Ban") {
@@ -496,7 +498,7 @@ export function handleAdminUpdateUser(body: any, currentUser: UserRecord | null)
 
     return {
       Code: 200,
-      UserID: target.id,
+      TargetUserID: target.id,
       BanTarget: { UserID: target.id, BanData: banInfo },
       RevokeSessionsFor: target.id,
       DeletedPostIDs: deletedPostIDs,
@@ -509,7 +511,7 @@ export function handleAdminUpdateUser(body: any, currentUser: UserRecord | null)
     if (ownerDenied) return ownerDenied;
     db.prepare("UPDATE users SET status = 'active', ban_data = NULL WHERE id = ?").run(target.id);
     logAdminAction(currentUser, "UserUnbanned", target.user, {});
-    return { Code: 200, UserID: target.id };
+    return { Code: 200, TargetUserID: target.id };
   }
 
   if (task === "Disable" || task === "Enable") {
@@ -521,7 +523,7 @@ export function handleAdminUpdateUser(body: any, currentUser: UserRecord | null)
     logAdminAction(currentUser, task === "Disable" ? "UserDisabled" : "UserEnabled", target.user, {});
     return {
       Code: 200,
-      UserID: target.id,
+      TargetUserID: target.id,
       RevokeSessionsFor: task === "Disable" ? target.id : undefined
     };
   }
@@ -532,7 +534,7 @@ export function handleAdminUpdateUser(body: any, currentUser: UserRecord | null)
     }
     db.prepare("DELETE FROM sessions WHERE user_id = ?").run(target.id);
     logAdminAction(currentUser, "UserSignedOut", target.user, {});
-    return { Code: 200, UserID: target.id, RevokeSessionsFor: target.id };
+    return { Code: 200, TargetUserID: target.id, RevokeSessionsFor: target.id };
   }
 
   if (task === "PurgeContent") {
@@ -545,7 +547,7 @@ export function handleAdminUpdateUser(body: any, currentUser: UserRecord | null)
       Posts: deletedPostIDs.length,
       Chats: deletedChatIDs.length
     });
-    return { Code: 200, UserID: target.id, DeletedPostIDs: deletedPostIDs, DeletedChatIDs: deletedChatIDs };
+    return { Code: 200, TargetUserID: target.id, DeletedPostIDs: deletedPostIDs, DeletedChatIDs: deletedChatIDs };
   }
 
   return { Code: 400, Message: `Unknown user task ${task}.` };

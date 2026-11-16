@@ -1,21 +1,21 @@
 
 var AboutText = [
-  ['Title', 'Photop Rules'],
+  ['Title', 'Memblu Rules'],
   ['Paragraph', 'To keep this online community safe, there are a set of rules you must follow. Not following these rules may risk account termination.'],
   ['Paragraph', '<b>These Rules Consist Of:</b>'],
   ['Paragraph', '<b>No Abuse/Harassment:</b> Abusing or harassing others as well as inciting others is strictly against the rules.'],
   ['Paragraph', '<b>No Violence:</b> Promoting or inciting violence is highly against the rules.'],
   ['Paragraph', '<b>No Hateful Contect:</b> Spreading hateful content will result in a platform ban.'],
   ['Paragraph', '<b>No Child Exploitation:</b> There is zero tolerance for child exploitation.'],
-  ['Paragraph', '<b>No Terrorism/Violent Extremism:</b> Promoting Terrorism/Violent Extremism is highly against Photop rules.'],
+  ['Paragraph', '<b>No Terrorism/Violent Extremism:</b> Promoting Terrorism/Violent Extremism is highly against Memblu rules.'],
   ['Paragraph', '<b>No Promoting Suicide/Self Harm:</b> Promoting such material will result in penalties.'],
   ['Paragraph', '<b>No Illegal Content:</b> Posting illegal materials or content will not only result in account termination but also result in authority notification.'],
   ['Paragraph', '<b>No Sensitive/Adult Content (NSFW):</b> Posting any form of sensitive/adult content including not safe for work material will result in account penalties.'],
 
-  ['Paragraph', '<b>Nothing Private:</b> Anyone can view content on Photop, so posting anything private to you or someone else is against the rules.'],
+  ['Paragraph', '<b>Nothing Private:</b> Anyone can view content on Memblu, so posting anything private to you or someone else is against the rules.'],
   ['Paragraph', '<b>Permission Required:</b> When sending material with others you must have their permission.'],
 
-  ['Paragraph', '<b>No Platform Manipulation (Spam):</b> Using Photop in a way which abuses the system or abuses other users will result in account termination.'],
+  ['Paragraph', '<b>No Platform Manipulation (Spam):</b> Using Memblu in a way which abuses the system or abuses other users will result in account termination.'],
   ['Paragraph', '<b>No Impersonation:</b> Impersonating someone else will result in account termination.'],
   ['Paragraph', '<b>Copyright and Trademark:</b> Posting any assets which contain copyrighted or trademarked material without permission is against the rules.'],
 ];

@@ -7,28 +7,36 @@ export function handleGetProfile(body: any, currentUser: UserRecord | null): any
   const { ProfileUserID } = body;
   if (!ProfileUserID) return { Code: 404 };
 
-  const target = db.prepare("SELECT * FROM users WHERE id = ?").get(ProfileUserID) as UserRecord | undefined;
+  // Profiles can be addressed by the account's user ID or its custom profile
+  // URL (for example `?user=wrapjs`). IDs take priority so an existing share
+  // link always resolves to the same account.
+  let target = db.prepare("SELECT * FROM users WHERE id = ?").get(ProfileUserID) as UserRecord | undefined;
+  if (!target) {
+    target = db.prepare("SELECT * FROM users WHERE custom_url = ? COLLATE NOCASE").get(ProfileUserID) as UserRecord | undefined;
+  }
   if (!target) return { Code: 404, Message: "User not found." };
+
+  const targetID = target.id;
 
   if (currentUser) {
     const userBlocked = JSON.parse(currentUser.blocked_users || "[]");
-    if (userBlocked.includes(ProfileUserID)) {
+    if (userBlocked.includes(targetID)) {
       return { Code: 403, Message: "You have blocked this user." };
     }
   }
 
   let isFollowing = false;
   if (currentUser) {
-    const follow = db.prepare("SELECT 1 FROM follows WHERE follower_id = ? AND target_id = ?").get(currentUser.id, ProfileUserID);
+    const follow = db.prepare("SELECT 1 FROM follows WHERE follower_id = ? AND target_id = ?").get(currentUser.id, targetID);
     isFollowing = !!follow;
   }
 
   // The client renders all three profile tabs (Posts, Chats, Likes) from this one response,
   // so it has to carry the first page of each. Later pages come from GetPosts/GetProfileChats/
   // GetProfileLikes via infinite scroll.
-  const postsPage = handleGetPosts({ FromUserID: ProfileUserID, Amount: 15 }, currentUser);
-  const chatsPage = handleGetProfileChats({ GetUserID: ProfileUserID, Amount: 25 }, currentUser);
-  const likesPage = handleGetProfileLikes({ GetUserID: ProfileUserID, Amount: 15 }, currentUser);
+  const postsPage = handleGetPosts({ FromUserID: targetID, Amount: 15 }, currentUser);
+  const chatsPage = handleGetProfileChats({ GetUserID: targetID, Amount: 25 }, currentUser);
+  const likesPage = handleGetProfileLikes({ GetUserID: targetID, Amount: 15 }, currentUser);
 
   // "Likes" marks which posts the *viewer* has liked, across both the Posts and Likes tabs.
   const viewerLikes = new Map<string, { _id: string }>();
@@ -41,6 +49,7 @@ export function handleGetProfile(body: any, currentUser: UserRecord | null): any
     UserInfo: {
       _id: target.id,
       User: target.user,
+      CustomURL: target.custom_url || null,
       Role: target.role,
       CreationTime: target.creation_time,
       Settings: JSON.parse(target.settings || "{}"),
@@ -211,7 +220,8 @@ export function handleGetProfileLikes(body: any, currentUser: UserRecord | null)
       Likes: p.likes || 0,
       Quotes: p.quotes || 0,
       Chats: p.chats || 0,
-      Media: p.media ? JSON.parse(p.media) : undefined
+      Media: p.media ? JSON.parse(p.media) : undefined,
+      EditedAt: p.edited_at || null
     }));
 
     const authorIds = Array.from(new Set(postRows.map(p => p.user_id)));

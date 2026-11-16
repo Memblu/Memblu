@@ -4,6 +4,7 @@ var AwaitingResponse = {};
 var UserID = null;
 var Username = null;
 var UserEmail = null;
+var UserCustomURL = null;
 var Settings = {};
 var ProfileData = {};
 var LoginUserRole = null;
@@ -184,7 +185,7 @@ function ConnectToBridge() {
               cache.delete(LoadScriptKeys[s]);
             }
           });
-          ShowPopUp("Photop Update", "It appears Photop has a new update! Refresh for the newest features!", [["Refresh", "#618BFF", "RefreshPage"], ["Later", "#B3B3B3", null]]);
+          ShowPopUp("Memblu Update", "It appears Memblu has a new update! Refresh for the newest features!", [["Refresh", "#618BFF", "RefreshPage"], ["Later", "#B3B3B3", null]]);
         }
 
         if (Data.Code == 200) {
@@ -201,6 +202,7 @@ function ConnectToBridge() {
                 ProfileData = Data.UserData.ProfileData || {};
                 UpdateDisplaySettings();
                 UserEmail = Data.UserData.Email;
+                UserCustomURL = Data.UserData.CustomURL || null;
                 BlockedUsers = Data.UserData.BlockedUsers || [];
                 AuthUpdate(true);
                 if (Data.BanData != null) {
@@ -276,7 +278,10 @@ function ConnectToBridge() {
     if (Body.Token != null) {
       AuthToken = Body.Token;
     }
-    if (Body.UserID != null) {
+    // Only an authentication response may replace the signed-in identity.
+    // Other endpoints (for example admin actions) may echo a target user's ID
+    // and must not be allowed to hijack the session identity.
+    if (Body.UserID != null && Body.Token != null) {
       UserID = Body.UserID;
     }
     if (Body.UpdateDisplaySettings != null) {
@@ -388,6 +393,7 @@ function AuthUpdate(IsAuth) {
     UserID = null;
     Username = null;
     UserEmail = null;
+    UserCustomURL = null;
     Settings = {};
     ProfileData = {};
     LoginUserRole = null;
@@ -466,6 +472,7 @@ async function LoginToAccount(Data) {
       Username = Data.RealUser;
       UserID = Data.UserID;
       UserEmail = Data.Email;
+      UserCustomURL = Data.CustomURL || null;
       Settings = Data.Settings || {};
       ProfileData = Data.ProfileData || {};
       UpdateDisplaySettings();
@@ -1862,6 +1869,9 @@ function CreateNormalChat(Data, UserData, Holder, ReplyData) {
   ChatText.innerHTML = CleanString(Data.Text);
   ChatText.innerHTML = ChatText.innerHTML.replace(/\&nbsp;/g, " ").replace(/\$\[NEWLINE\]\;/g, "<br/>");
   ChatText.className = UserData.User + "ChatText";
+  if (Data.EditedAt != null) {
+    AddChatEditedMarker(ChatMessage, Data._id);
+  }
 
   // Only real Photop chats have a stable backend id to attach likes to.
   ChatMessage.setAttribute("Source", Data.Source != null ? Data.Source : "");
@@ -1883,7 +1893,7 @@ function CreateNormalChat(Data, UserData, Holder, ReplyData) {
   } else if (Data.Source == "Twitch") {
     /*
     ChatMessage.addEventListener("click", function() {
-      ShowPopUp("Twitch Chat", "This is a chat from <b style='color:#6441a5'>Twitch.com</b>, and is only viewable. Chatting on this post only appears here on <b>Photop</b>!", [ ["Okay", "#618BFF", null] ]);
+      ShowPopUp("Twitch Chat", "This is a chat from <b style='color:#6441a5'>Twitch.com</b>, and is only viewable. Chatting on this post only appears here on <b>Memblu</b>!", [ ["Okay", "#618BFF", null] ]);
     });
     */
     ChatMessage.setAttribute("LiveChatClickData", "TwitchLiveChatPopUp");
@@ -2000,6 +2010,9 @@ function CreateMinifyChat(Data, UserData, Holder, PreviousChildDOMObject, ForceM
   ChatText.innerHTML = CleanString(Data.Text);
   ChatText.innerHTML = ChatText.innerHTML.replace(/\&nbsp;/g, " ").replace(/\$\[NEWLINE\]\;/g, "<br/>");
   ChatText.className = UserData.User + "ChatText";
+  if (Data.EditedAt != null) {
+    AddChatEditedMarker(ChatMessage, Data._id);
+  }
 
   // Only real Photop chats have a stable backend id to attach likes to.
   ChatMessage.setAttribute("Source", Data.Source != null ? Data.Source : "");
@@ -2019,6 +2032,51 @@ function CreateMinifyChat(Data, UserData, Holder, PreviousChildDOMObject, ForceM
   return ChatMessage;
 }
 
+// A small grey italic marker sits under an edited chat's text.
+function AddChatEditedMarker(ChatMessage, ChatID) {
+  if (ChatMessage == null || ChatID == null) {
+    return;
+  }
+  var MarkerID = ChatID + "ChatEdited";
+  if (ChatMessage.querySelector('[id="' + MarkerID + '"]') != null) {
+    return;
+  }
+  if (ChatMessage.querySelector("#ChatText") == null) {
+    return;
+  }
+  var Marker = createElement(MarkerID, "div", ChatMessage, [
+      ["position", "relative"],
+      ["display", "block"],
+      ["width", "calc(100% - 60px)"],
+      ["left", "45px"],
+      ["margin-top", "1px"],
+
+      // Text:
+      ["font-size", "11px"],
+      ["font-family", FontTypeA],
+      ["font-style", "italic"],
+      ["font-weight", "400"],
+      ["color", "#999999"],
+      ["text-align", "left"]
+  ]);
+  Marker.textContent = "(edited)";
+}
+
+// Updates every mounted copy of a chat after its author edits it.
+function UpdateRenderedChatText(ChatID, Text) {
+  var Messages = document.querySelectorAll('[id="' + ChatID + 'Chat"]');
+  for (var i = 0; i < Messages.length; i++) {
+    var Message = Messages[i];
+    var TextBox = Message.querySelector("#ChatText");
+    if (TextBox != null) {
+      var SafeText = CleanString(Text);
+      TextBox.innerHTML = SafeText.replace(/\&nbsp;/g, " ").replace(/\$\[NEWLINE\]\;/g, "<br/>");
+      Message.setAttribute("Text", SafeText);
+    }
+    AddChatEditedMarker(Message, ChatID);
+  }
+}
+
 function ChatHoverDetector(Chat) {
   if (Chat.style.backgroundColor != 'rgba(42, 245, 181, 0.15)') {
     Chat.style.backgroundColor = ContentColor;
@@ -2035,6 +2093,172 @@ function ChatHoverOutDetector(Chat) {
     Chat.querySelector('#MiniTimestampTx').style.display = 'none';
   }
 }
+function EditChat(Selected) {
+  Selected = Selected[3];
+  if (Selected == null || UserID == null || Selected.UserID != UserID || find("EditChatOverlay") != null) {
+    return;
+  }
+  var ChatID = Selected._id;
+
+  var Overlay = createElement("EditChatOverlay", "div", "body", [
+      ["position", "fixed"],
+      ["display", "flex"],
+      ["align-items", "center"],
+      ["justify-content", "center"],
+      ["left", "0px"],
+      ["top", "0px"],
+      ["width", "100%"],
+      ["height", "100%"],
+      ["padding", "8px"],
+      ["box-sizing", "border-box"],
+      ["z-index", "3500"],
+      ["background-color", "rgba(0, 0, 0, 0.6)"]
+  ]);
+  var Frame = createElement("EditChatFrame", "div", Overlay, [
+      ["position", "relative"],
+      ["width", "100%"],
+      ["max-width", "420px"],
+      ["box-sizing", "border-box"],
+      ["padding", "14px"],
+      ["background-color", ContentColor],
+      ["border", "4px solid " + BorderColor],
+      ["border-radius", "12px"]
+  ]);
+  createElement("EditChatTitle", "div", Frame, [
+      ["position", "relative"],
+      ["margin-bottom", "10px"],
+
+      // Text:
+      ["font-size", "20px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "900"],
+      ["color", FontColorA],
+      ["text-align", "left"]
+  ]).textContent = "Edit Chat";
+
+  var TextBox = createElement("EditChatText", "textarea", Frame, [
+      ["position", "relative"],
+      ["display", "block"],
+      ["box-sizing", "border-box"],
+      ["width", "100%"],
+      ["min-height", "90px"],
+      ["max-height", "35vh"],
+      ["padding", "8px"],
+      ["border-width", "0px"],
+      ["border-radius", "8px"],
+      ["background-color", ContentColorLayer3],
+      ["resize", "vertical"],
+      ["outline", "none"],
+
+      // Text:
+      ["font-size", "16px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "400"],
+      ["color", FontColorA],
+      ["text-align", "left"]
+  ]);
+  TextBox.value = Selected.Text || "";
+
+  var ErrorBox = createElement("EditChatError", "div", Frame, [
+      ["position", "relative"],
+      ["display", "none"],
+      ["margin-top", "8px"],
+
+      // Text:
+      ["font-size", "13px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "900"],
+      ["color", "#FF5C5C"],
+      ["text-align", "left"]
+  ]);
+
+  var Buttons = createElement("EditChatButtons", "div", Frame, [
+      ["position", "relative"],
+      ["display", "flex"],
+      ["justify-content", "flex-end"],
+      ["margin-top", "10px"]
+  ]);
+  var CancelButton = createElement("EditChatCancel", "div", Buttons, [
+      ["position", "relative"],
+      ["padding", "7px 12px"],
+      ["margin-right", "8px"],
+      ["background-color", "#475059"],
+      ["border-radius", "8px"],
+      ["cursor", "pointer"],
+
+      // Text:
+      ["font-size", "14px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "900"],
+      ["color", "#ffffff"]
+  ]);
+  CancelButton.textContent = "Cancel";
+  var SaveButton = createElement("EditChatSave", "div", Buttons, [
+      ["position", "relative"],
+      ["padding", "7px 12px"],
+      ["background-color", ThemeColor],
+      ["border-radius", "8px"],
+      ["cursor", "pointer"],
+
+      // Text:
+      ["font-size", "14px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "900"],
+      ["color", "#ffffff"]
+  ]);
+  SaveButton.textContent = "Save";
+
+  function CloseEditor() {
+    Overlay.remove();
+  }
+  CancelButton.addEventListener("click", CloseEditor);
+  Overlay.addEventListener("click", function(event) {
+    if (event.target == Overlay) {
+      CloseEditor();
+    }
+  });
+
+  var Saving = false;
+  SaveButton.addEventListener("click", function() {
+    if (Saving == true) {
+      return;
+    }
+    var Value = TextBox.value.replace(/\r\n/g, "\n").trim();
+    if (Value == "") {
+      ErrorBox.textContent = "A chat cannot be empty.";
+      ErrorBox.style.display = "block";
+      return;
+    }
+    if (Value.length > 200) {
+      ErrorBox.textContent = "Chats can be up to 200 characters long.";
+      ErrorBox.style.display = "block";
+      return;
+    }
+
+    Saving = true;
+    SaveButton.textContent = "Saving...";
+    setCSS(SaveButton, "opacity", "0.7");
+    SendRequest("UpdateChat", { Task: "Edit", ChatID: ChatID, Text: Value }, function(Metadata, Result) {
+      if (Result.Code == 200) {
+        UpdateRenderedChatText(ChatID, Value);
+        CloseEditor();
+        return;
+      }
+      Saving = false;
+      SaveButton.textContent = "Save";
+      setCSS(SaveButton, "opacity", "1");
+      ErrorBox.textContent = Result.Message || "Could not save the edit. Please try again.";
+      ErrorBox.style.display = "block";
+    });
+  });
+
+  TextBox.addEventListener("input", function() {
+    ErrorBox.style.display = "none";
+  });
+  TextBox.focus();
+  TextBox.setSelectionRange(TextBox.value.length, TextBox.value.length);
+}
+
 function LiveChatDropdownData(Chat) {
   if (Chat.className.includes("GhostSendChatMessage") == true) {
     return;
@@ -2064,6 +2288,9 @@ function LiveChatDropdownData(Chat) {
   }
   if (UserID != null && (UserID == Data.UserID || CheckPermision(LoginUserRole, "CanDeleteChats") == true)) {
     DropdownChatButtons.unshift(["Delete", "#FF5C5C", "ChatActions", ["Delete", Data._id, Data.User, Data.PostID]]);
+  }
+  if (UserID != null && UserID == Data.UserID) {
+    DropdownChatButtons.unshift(["Edit Chat", ThemeColor, "EditChat", Data]);
   }
   DropdownChatButtons.unshift(["Quote in New Post", "#C95EFF", "QuoteChatInNewPost", { _id: Data._id }]);
   if (UserID != null) {
@@ -2167,7 +2394,7 @@ function RenderChatMessage(RequestedChats, Chats, Users, Replies, ClearHolder, F
 
               var SiblingChat = ChatMessage.nextSibling; //Holder.firstChild;
               if (i == Chats.length - 1 && SiblingChat != null && SiblingChat.getAttribute("UserID") == Data.UserID && SiblingChat.querySelector("#ChatProfilePic") != null && SiblingChat.querySelector("#ReplyHolder") == null) {
-                var FixedChat = CreateMinifyChat({ _id: SiblingChat.id.replace(/Chat/g, ""), UserID: SiblingChat.getAttribute("UserID"), Text: SiblingChat.querySelector("#ChatText").textContent, Timestamp: parseInt(SiblingChat.getAttribute("Timestamp")), Likes: parseInt(SiblingChat.getAttribute("ChatLikes")) || 0, IsLiked: SiblingChat.getAttribute("ChatIsLiked") == "true", Source: SiblingChat.getAttribute("Source") || undefined }, UserData, Holder, ChatMessage);//, (Chats[i+1] != null && Chats[i+1].UserID == Data.UserID));
+                var FixedChat = CreateMinifyChat({ _id: SiblingChat.id.replace(/Chat/g, ""), UserID: SiblingChat.getAttribute("UserID"), Text: SiblingChat.querySelector("#ChatText").textContent, Timestamp: parseInt(SiblingChat.getAttribute("Timestamp")), Likes: parseInt(SiblingChat.getAttribute("ChatLikes")) || 0, IsLiked: SiblingChat.getAttribute("ChatIsLiked") == "true", Source: SiblingChat.getAttribute("Source") || undefined, EditedAt: SiblingChat.querySelector('[id$="ChatEdited"]') != null ? 1 : null }, UserData, Holder, ChatMessage);//, (Chats[i+1] != null && Chats[i+1].UserID == Data.UserID));
                 Holder.insertBefore(FixedChat, SiblingChat);
                 SiblingChat.remove();
                 if (FixedChat.nextSibling != null && FixedChat.nextSibling.getAttribute("UserID") == Data.UserID) {
@@ -2222,7 +2449,7 @@ function RenderChatMessage(RequestedChats, Chats, Users, Replies, ClearHolder, F
 
               var SiblingChat = ChatMessage.nextSibling; //Holder.firstChild;
               if (i == Chats.length - 1 && SiblingChat != null && SiblingChat.getAttribute("UserID") == Data.UserID && SiblingChat.querySelector("#ChatProfilePic") != null && SiblingChat.querySelector("#ReplyHolder") == null) {
-                var FixedChat = CreateMinifyChat({ _id: SiblingChat.id.replace(/Chat/g, ""), UserID: SiblingChat.getAttribute("UserID"), Text: SiblingChat.querySelector("#ChatText").textContent, Timestamp: parseInt(SiblingChat.getAttribute("Timestamp")), Likes: parseInt(SiblingChat.getAttribute("ChatLikes")) || 0, IsLiked: SiblingChat.getAttribute("ChatIsLiked") == "true", Source: SiblingChat.getAttribute("Source") || undefined }, UserData, Holder, ChatMessage);//, (Chats[i+1] != null && Chats[i+1].UserID == Data.UserID));
+                var FixedChat = CreateMinifyChat({ _id: SiblingChat.id.replace(/Chat/g, ""), UserID: SiblingChat.getAttribute("UserID"), Text: SiblingChat.querySelector("#ChatText").textContent, Timestamp: parseInt(SiblingChat.getAttribute("Timestamp")), Likes: parseInt(SiblingChat.getAttribute("ChatLikes")) || 0, IsLiked: SiblingChat.getAttribute("ChatIsLiked") == "true", Source: SiblingChat.getAttribute("Source") || undefined, EditedAt: SiblingChat.querySelector('[id$="ChatEdited"]') != null ? 1 : null }, UserData, Holder, ChatMessage);//, (Chats[i+1] != null && Chats[i+1].UserID == Data.UserID));
                 Holder.insertBefore(FixedChat, SiblingChat);
                 SiblingChat.remove();
                 if (FixedChat.nextSibling != null && FixedChat.nextSibling.getAttribute("UserID") == Data.UserID) {
@@ -2377,6 +2604,14 @@ function NewChatRecieve(Metadata, Body) {
   }
 
   RenderChatMessage([Body.Chats[0].PostID], Body.Chats, SendUser, ReplyData, false, false, true, true);
+
+  // On mobile the open post view should follow the live conversation, even
+  // while the keyboard is up.
+  if (MobilePostView != null && MobilePostView.ID == Body.Chats[0].PostID) {
+    setTimeout(function () {
+      ScrollMobileChatToBottom(true);
+    }, 60);
+  }
 }
 
 function NewChatDeleted(Metadata, Body) {
@@ -2387,6 +2622,25 @@ function NewChatDeleted(Metadata, Body) {
         ChatObject.remove();
       }
     }
+  }
+}
+
+function PostUpdated(Metadata, Body) {
+  if (Body.PostID == null || Body.Text == null) {
+    return;
+  }
+  // Pages that never loaded the timeline renderer have nothing to update.
+  if (typeof UpdateRenderedPostText == "function") {
+    UpdateRenderedPostText(Body.PostID, Body.Text);
+  }
+}
+
+function ChatUpdated(Metadata, Body) {
+  if (Body.ChatID == null || Body.Text == null) {
+    return;
+  }
+  if (typeof UpdateRenderedChatText == "function") {
+    UpdateRenderedChatText(Body.ChatID, Body.Text);
   }
 }
 
@@ -3530,6 +3784,9 @@ function SaveAccountData(UpdateData, SendBlobURL, SettingsPage, SaveLocalStorage
       }
 
       Settings = Data.Settings;
+      if (Data.CustomURL !== undefined) {
+        UserCustomURL = Data.CustomURL;
+      }
       if (SendBlobURL != null) {
         if (SettingsPage == "AccountScreen") {
           SendImageToServer("ProfileImageUpload", {}, [SendBlobURL]);
@@ -3542,8 +3799,10 @@ function SaveAccountData(UpdateData, SendBlobURL, SettingsPage, SaveLocalStorage
     } else {
       if (Data.Code == 403) {
         ShowPopUp("Password Incorrect", "Your old password is incorrect.", [["Okay", "#618BFF", null]]);
+      } else if (Data.Code == 409) {
+        ShowPopUp("URL Taken", Data.Message || "That profile URL is already taken.", [["Okay", "#618BFF", null]]);
       } else if (Data.Code == 400) {
-        ShowPopUp("That's a lot of Bytes", "Profile pictures must be under <b>2 MB</b> in size!", [["Okay", "#618BFF", null]]);
+        ShowPopUp("Invalid Settings", Data.Message || "Profile pictures must be under <b>2 MB</b> in size!", [["Okay", "#618BFF", null]]);
       } else {
         ShowPopUp("Something Broke...", "Hmm... Something didn't work right. Please try again!", [["Okay", "#618BFF", null]]);
       }
@@ -3663,7 +3922,7 @@ function AdminForceRefresh(Metadata, Body) {
       ["padding", "20px"],
       ["box-sizing", "border-box"]
     ]);
-    UpdateOverlay.textContent = "Photop has been updated. Reloading…";
+    UpdateOverlay.textContent = "Memblu has been updated. Reloading…";
     setTimeout(function () {
       window.location.reload();
     }, 1200);
@@ -3758,7 +4017,7 @@ function ModerateUserAction(Task, Data) {
 
 function AlertUserOfTor() {
   WebSocketDisabled = true;
-  ShowPopUp("TOR Blocked", "For moderation reasons, TOR Browser is currently blocked. Please use a standard browser such as <a style='color: #3D87FF' href='https://www.google.com/chrome/'>Google Chrome</a> in order to use Photop.", []);
+  ShowPopUp("TOR Blocked", "For moderation reasons, TOR Browser is currently blocked. Please use a standard browser such as <a style='color: #3D87FF' href='https://www.google.com/chrome/'>Google Chrome</a> in order to use Memblu.", []);
 }
 
 var BanData = null;
@@ -3981,6 +4240,85 @@ var PrimaryObj = find("Primary");
 // The real post/button/chat elements are moved into the overlay (so likes, sending, etc. keep
 // working) and put back, with their original inline styles, when it closes.
 var MobilePostView = null;
+var MobileViewportHandler = null;
+
+// The chat panel inside the mobile view. Posting into a detached element while
+// the view animates closed returns null, so every caller checks before using it.
+function MobileChatFrame() {
+  if (MobilePostView == null || MobilePostView.Chat == null || MobilePostView.Chat.parentNode == null) {
+    return null;
+  }
+  return MobilePostView.Chat.querySelector("#Chat");
+}
+
+function ScrollMobileChatToBottom(Instant) {
+  var Frame = MobileChatFrame();
+  if (Frame == null) {
+    return;
+  }
+  if (Instant == true) {
+    Frame.scrollTop = Frame.scrollHeight;
+  } else {
+    Frame.scrollTo({ top: Frame.scrollHeight, behavior: "smooth" });
+  }
+}
+
+// While the mobile keyboard is open the post card is folded away so the chat
+// gets the screen; a long post would otherwise leave only a couple of lines.
+function SetMobilePostCollapsed(Collapsed) {
+  var Top = find("MobilePostViewTop");
+  if (Top == null) {
+    return;
+  }
+  if (Collapsed == true) {
+    if (Top.getAttribute("Collapsed") == "true") {
+      return;
+    }
+    Top.setAttribute("Collapsed", "true");
+    Top.style.maxHeight = "0px";
+    Top.style.marginTop = "0px";
+    Top.style.marginBottom = "0px";
+    Top.style.overflow = "hidden";
+  } else if (Top.getAttribute("Collapsed") == "true") {
+    Top.removeAttribute("Collapsed");
+    Top.style.maxHeight = "55%";
+    Top.style.marginTop = "8px";
+    Top.style.marginBottom = "0px";
+    Top.style.overflow = "hidden";
+  }
+}
+
+function SyncMobileChatViewport() {
+  if (MobilePostView == null || MobilePostView.Closing == true) {
+    return;
+  }
+  var Holder = find("LiveChatHolder");
+  if (Holder == null) {
+    return;
+  }
+
+  // Size against the visual viewport so the input row stays above the keyboard
+  // instead of being covered by it on mobile browsers.
+  var Viewport = window.visualViewport;
+  if (Viewport != null) {
+    Holder.style.height = Viewport.height + "px";
+    Holder.style.top = Viewport.offsetTop + "px";
+  }
+
+  var InputFocused = MobilePostView.Input != null && document.activeElement == MobilePostView.Input;
+  SetMobilePostCollapsed(InputFocused);
+
+  // Keep the newest message in view, including while the keyboard is open and
+  // when the chat is long.
+  var Frame = MobileChatFrame();
+  if (Frame != null) {
+    requestAnimationFrame(function () {
+      if (MobilePostView != null && MobilePostView.Closing != true) {
+        Frame.scrollTop = Frame.scrollHeight;
+      }
+    });
+  }
+}
 
 var MobileButtonRowStyle = { "position": "relative", "bottom": "auto", "width": "100%", "height": "20px", "flex": "0 0 auto", "margin": "8px 0px 12px 0px", "padding-top": "0px" };
 
@@ -4022,8 +4360,22 @@ async function OpenMobileChat(PostID) {
     return;
   }
   ScrolledToMobile = window.scrollY;
-  MobilePostView = { ID: PostID, Container: PostContainer, Post: Post, Buttons: Buttons, Chat: Chat, Saved: [], Closing: false };
+  MobilePostView = {
+    ID: PostID,
+    Container: PostContainer,
+    Post: Post,
+    Buttons: Buttons,
+    Chat: Chat,
+    Input: find(PostID + "TextBox"),
+    HolderHeight: Holder.style.height,
+    HolderTop: Holder.style.top,
+    HolderTransition: Holder.style.transition,
+    Saved: [],
+    Closing: false
+  };
   Holder.setAttribute("Open", "");
+  // Only the slide should animate; the viewport-following height must be instant.
+  Holder.style.transition = "left 0.4s ease 0s";
 
   // Top bar with back button:
   var Bar = createElement("MobilePostViewBar", "div", Holder, [
@@ -4111,11 +4463,47 @@ async function OpenMobileChat(PostID) {
     ChatContainer.scrollTo(0, ChatContainer.scrollHeight);
   }
 
+  // Fold the post away as soon as the reader starts typing, and bring the chat
+  // back when they are done. Without this a long post or a busy chat leaves
+  // almost no room above the keyboard.
+  if (MobilePostView.Input != null) {
+    MobilePostView.Input.addEventListener("focus", function () {
+      SetMobilePostCollapsed(true);
+      SyncMobileChatViewport();
+      setTimeout(function () {
+        ScrollMobileChatToBottom(true);
+      }, 250);
+    });
+    MobilePostView.Input.addEventListener("blur", function () {
+      SetMobilePostCollapsed(false);
+      SyncMobileChatViewport();
+    });
+  }
+
+  MobileViewportHandler = function () {
+    SyncMobileChatViewport();
+  };
+  window.addEventListener("resize", MobileViewportHandler);
+  if (window.visualViewport != null) {
+    window.visualViewport.addEventListener("resize", MobileViewportHandler);
+    window.visualViewport.addEventListener("scroll", MobileViewportHandler);
+  }
+
   Holder.style.left = "0%";
   await sleep(400);
 
+  SyncMobileChatViewport();
+  ScrollMobileChatToBottom(true);
+  // Late layout (fonts, wrapped media) can still change the chat height.
+  setTimeout(function () {
+    ScrollMobileChatToBottom(true);
+  }, 250);
+
   setCSS("Primary", "overflow", "hidden");
   setCSS("body", "position", "fixed");
+  // Locking the body can change the visual viewport one last time.
+  SyncMobileChatViewport();
+  ScrollMobileChatToBottom(true);
 }
 
 async function CloseMobileChat() {
@@ -4125,6 +4513,17 @@ async function CloseMobileChat() {
     return;
   }
   View.Closing = true;
+  if (MobileViewportHandler != null) {
+    window.removeEventListener("resize", MobileViewportHandler);
+    if (window.visualViewport != null) {
+      window.visualViewport.removeEventListener("resize", MobileViewportHandler);
+      window.visualViewport.removeEventListener("scroll", MobileViewportHandler);
+    }
+    MobileViewportHandler = null;
+  }
+  Holder.style.height = View.HolderHeight || "";
+  Holder.style.top = View.HolderTop || "";
+  Holder.style.transition = View.HolderTransition || "";
   removeCSS("Primary", "overflow");
   removeCSS("body", "position");
   window.scrollTo({ top: ScrolledToMobile, left: 0, behavior: "auto" });
@@ -4304,7 +4703,7 @@ function CheckPrimarySize(Source) {
         ["font-weight", "900"],
         ["color", ThemeColor],
         ["user-select", "none"]
-      ]).textContent = "Photop";
+      ]).textContent = "Memblu";
       setCSS("MainContent", "margin-top", "56px"); // Clear the fixed top bar.
 
       var swiper = new Swipe("body");

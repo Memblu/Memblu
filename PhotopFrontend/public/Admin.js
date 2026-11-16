@@ -1,4 +1,4 @@
-// Photop Admin / Moderator Panel
+// Memblu Admin / Moderator Panel
 // Renders the staff tools exposed by the Admin* WebSocket tasks:
 // AdminOverview, AdminUsers, AdminUserDetail, AdminUpdateUser, AdminContent,
 // AdminContentAction, AdminReports, AdminAppeals, AdminSessions,
@@ -13,7 +13,7 @@ if (ExistingAdminPanel != null) {
 if (HasAdminAccess(LoginUserRole) != true) {
   ShowPopUp("Staff Only", "You do not have permission to open the admin panel.", [["Okay", "#618BFF", null]]);
 } else {
-  SetPageTitle("Admin Panel | Photop");
+  SetPageTitle("Admin Panel");
 
   var AdminState = {
     Tab: "Overview",
@@ -28,6 +28,10 @@ if (HasAdminAccess(LoginUserRole) != true) {
   var AdminUIDCounter = 0;
   var AdminTabButtons = {};
   var AdminTabNames = ["Overview", "Users", "Content", "Reports", "Appeals", "Sessions", "Audit Log", "Broadcast"];
+
+  // Phones get a full-screen, stacked card layout. Tablets and desktops keep
+  // the original sidebar + table layout exactly as it was.
+  var AdminIsMobileLayout = DeviceIsMobile() == true || MobileVersion == true || ForceMobileVersion == true;
 
   function AdminID(Prefix) {
     AdminUIDCounter = AdminUIDCounter + 1;
@@ -76,7 +80,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
     var Input = createElement(AdminID("AdminInput"), IsTextArea ? "textarea" : "input", Parent, [
       ["box-sizing", "border-box"],
       ["width", "100%"],
-      ["max-width", MaxWidth || "460px"],
+      ["max-width", AdminIsMobileLayout ? "100%" : (MaxWidth || "460px")],
       ["min-height", IsTextArea ? "90px" : "38px"],
       ["padding", "8px 10px"],
       ["margin", "4px 8px 4px 0px"],
@@ -202,8 +206,20 @@ if (HasAdminAccess(LoginUserRole) != true) {
     return Section;
   }
 
-  function AdminRow(Parent, Widths) {
-    var Row = createElement(AdminID("AdminRow"), "div", Parent, [
+  function AdminRow(Parent, Widths, Labels) {
+    if (Labels != null && Parent != null) Parent.AdminLabels = Labels;
+    var Row = createElement(AdminID("AdminRow"), "div", Parent, AdminIsMobileLayout ? [
+      ["display", "block"],
+      ["box-sizing", "border-box"],
+      ["width", "100%"],
+      ["padding", "8px"],
+      ["margin-bottom", "6px"],
+      ["background-color", ContentColorLayer3],
+      ["border-radius", "8px"],
+      ["font-size", "14px"],
+      ["font-family", FontTypeA],
+      ["color", FontColorA]
+    ] : [
       ["display", "flex"],
       ["box-sizing", "border-box"],
       ["width", "100%"],
@@ -217,12 +233,38 @@ if (HasAdminAccess(LoginUserRole) != true) {
       ["align-items", "center"]
     ]);
     Row.AdminWidths = Widths;
+    Row.AdminLabels = Labels != null ? Labels : (Parent != null ? Parent.AdminLabels : null);
+    return Row;
+  }
+
+  // Column names for the desktop table. On phones the row is hidden and its
+  // labels are reused to caption each value inside the stacked cards.
+  function AdminTableHeader(Parent, Widths, Labels) {
+    if (Parent != null) Parent.AdminLabels = Labels;
+    var Row = AdminRow(Parent, Widths);
+    if (AdminIsMobileLayout) {
+      Row.style.display = "none";
+      return Row;
+    }
+    for (var i = 0; i < Labels.length; i++) {
+      AdminCell(Row, i, Labels[i], [["color", "#aaaaaa"], ["font-weight", "900"]]);
+    }
     return Row;
   }
 
   function AdminCell(Row, Index, Text, Styles, Tag) {
     var Width = Row.AdminWidths != null && Row.AdminWidths[Index] != null ? Row.AdminWidths[Index] : "auto";
-    var Cell = createElement(AdminID("AdminCell"), Tag || "div", Row, [
+    var IsTitleCell = Index == 0;
+    var Cell = createElement(AdminID("AdminCell"), Tag || "div", Row, AdminIsMobileLayout ? [
+      ["display", "flex"],
+      ["align-items", "center"],
+      ["flex-wrap", "wrap"],
+      ["box-sizing", "border-box"],
+      ["width", "100%"],
+      ["margin-top", IsTitleCell ? "0px" : "3px"],
+      ["font-size", IsTitleCell ? "15px" : "14px"],
+      ["overflow-wrap", "break-word"]
+    ] : [
       ["flex", Width == "auto" ? "1" : "0 0 " + Width],
       ["min-width", "0px"],
       ["padding-right", "8px"],
@@ -231,7 +273,19 @@ if (HasAdminAccess(LoginUserRole) != true) {
     if (Styles != null) {
       for (var i = 0; i < Styles.length; i++) setCSS(Cell, Styles[i][0], Styles[i][1]);
     }
-    Cell.textContent = Text == null ? "" : String(Text);
+    var Label = AdminIsMobileLayout && !IsTitleCell && Row.AdminLabels != null ? Row.AdminLabels[Index] : null;
+    if (Label != null) {
+      var LabelText = createElement(AdminID("AdminCellLabel"), "span", Cell, [
+        ["flex", "0 0 auto"],
+        ["margin-right", "6px"],
+        ["font-size", "12px"],
+        ["font-family", FontTypeA],
+        ["font-weight", "900"],
+        ["color", "#999999"]
+      ]);
+      LabelText.textContent = Label;
+    }
+    Cell.appendChild(document.createTextNode(Text == null ? "" : String(Text)));
     return Cell;
   }
 
@@ -286,7 +340,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
       ["position", "absolute"],
       ["box-sizing", "border-box"],
       ["width", "100%"],
-      ["max-width", "440px"],
+      ["max-width", AdminIsMobileLayout ? "calc(100% - 16px)" : "440px"],
       ["max-height", "calc(100% - 40px)"],
       ["padding", "14px"],
       ["left", "50%"],
@@ -376,7 +430,17 @@ if (HasAdminAccess(LoginUserRole) != true) {
     ["-webkit-backdrop-filter", "blur(2px)"]
   ]);
 
-  var AdminFrame = createElement("AdminFrame", "div", AdminBackBlur, [
+  var AdminFrame = createElement("AdminFrame", "div", AdminBackBlur, AdminIsMobileLayout ? [
+    ["position", "absolute"],
+    ["box-sizing", "border-box"],
+    ["width", "100%"],
+    ["height", "100%"],
+    ["height", "100dvh"],
+    ["left", "0px"],
+    ["top", "0px"],
+    ["background-color", LeftSidebarColor],
+    ["overflow", "hidden"]
+  ] : [
     ["position", "absolute"],
     ["box-sizing", "border-box"],
     ["width", "96%"],
@@ -413,17 +477,28 @@ if (HasAdminAccess(LoginUserRole) != true) {
     ["flex-direction", "column"],
     ["justify-content", "center"]
   ]);
-  AdminText(AdminTitleHolder, "Admin Panel", [
+  var AdminTitleText = AdminText(AdminTitleHolder, "Admin Panel", [
     ["font-size", "26px"],
     ["font-family", FontTypeA],
     ["font-weight", "900"],
     ["color", FontColorA]
   ]);
-  AdminText(AdminTitleHolder, "Signed in as " + (Username || "Unknown") + " · " + String(LoginUserRole || "User"), [
+  var AdminSubtitleText = AdminText(AdminTitleHolder, "Signed in as " + (Username || "Unknown") + " · " + String(LoginUserRole || "User"), [
     ["font-size", "13px"],
     ["font-family", FontTypeA],
     ["color", "#aaaaaa"]
   ]);
+  if (AdminIsMobileLayout) {
+    setCSS(AdminHeader, "height", "54px");
+    setCSS(AdminHeader, "padding", "0px 10px");
+    setCSS(AdminTitleText, "font-size", "20px");
+    setCSS(AdminTitleHolder, "overflow", "hidden");
+    setCSS(AdminTitleHolder, "min-width", "0px");
+    setCSS(AdminSubtitleText, "font-size", "11px");
+    setCSS(AdminSubtitleText, "white-space", "nowrap");
+    setCSS(AdminSubtitleText, "overflow", "hidden");
+    setCSS(AdminSubtitleText, "text-overflow", "ellipsis");
+  }
 
   var AdminCloseButton = createElement("AdminCloseButton", "div", AdminHeader, [
     ["display", "flex"],
@@ -441,6 +516,11 @@ if (HasAdminAccess(LoginUserRole) != true) {
   ]);
   AdminCloseButton.innerHTML = "&times;";
   AdminCloseButton.title = "Close Admin Panel";
+  if (AdminIsMobileLayout) {
+    setCSS(AdminCloseButton, "width", "38px");
+    setCSS(AdminCloseButton, "height", "38px");
+    setCSS(AdminCloseButton, "font-size", "28px");
+  }
   AdminCloseButton.addEventListener("click", function () {
     AdminBackBlur.remove();
     removeScript("./Admin.js");
@@ -451,10 +531,27 @@ if (HasAdminAccess(LoginUserRole) != true) {
     ["display", "flex"],
     ["box-sizing", "border-box"],
     ["width", "100%"],
-    ["height", "calc(100% - 62px)"]
+    ["height", "calc(100% - " + (AdminIsMobileLayout ? "54px" : "62px") + ")"],
+    ["flex-direction", AdminIsMobileLayout ? "column" : "row"]
   ]);
 
-  var AdminNav = createElement("AdminNav", "div", AdminBodyHolder, [
+  var AdminNav = createElement("AdminNav", "div", AdminBodyHolder, AdminIsMobileLayout ? [
+    ["box-sizing", "border-box"],
+    ["display", "flex"],
+    ["align-items", "center"],
+    ["width", "100%"],
+    ["height", "auto"],
+    ["flex", "0 0 auto"],
+    ["padding", "6px"],
+    ["background-color", LeftSidebarColor],
+    ["border-bottom-style", "solid"],
+    ["border-bottom-width", "2px"],
+    ["border-bottom-color", BorderColor],
+    ["overflow-x", "auto"],
+    ["overflow-y", "hidden"],
+    ["white-space", "nowrap"],
+    ["-webkit-overflow-scrolling", "touch"]
+  ] : [
     ["box-sizing", "border-box"],
     ["width", "190px"],
     ["flex", "0 0 190px"],
@@ -471,15 +568,29 @@ if (HasAdminAccess(LoginUserRole) != true) {
   var AdminContentPane = createElement("AdminContentPane", "div", AdminBodyHolder, [
     ["box-sizing", "border-box"],
     ["flex", "1"],
+    ["min-height", "0px"],
     ["height", "100%"],
-    ["padding", "12px"],
+    ["padding", AdminIsMobileLayout ? "8px" : "12px"],
     ["overflow-y", "auto"]
   ]);
   AdminContentPane.className = "StandardScroll";
 
   for (var AdminTabIndex = 0; AdminTabIndex < AdminTabNames.length; AdminTabIndex++) {
     (function (TabName) {
-      var TabButton = createElement(AdminID("AdminTabButton"), "div", AdminNav, [
+      var TabButton = createElement(AdminID("AdminTabButton"), "div", AdminNav, AdminIsMobileLayout ? [
+        ["box-sizing", "border-box"],
+        ["flex", "0 0 auto"],
+        ["width", "auto"],
+        ["padding", "7px 12px"],
+        ["margin", "0px 4px 0px 0px"],
+        ["background-color", ContentColorLayer3],
+        ["border-radius", "8px"],
+        ["cursor", "pointer"],
+        ["font-size", "15px"],
+        ["font-family", FontTypeA],
+        ["font-weight", "900"],
+        ["color", FontColorA]
+      ] : [
         ["box-sizing", "border-box"],
         ["width", "100%"],
         ["padding", "9px 10px"],
@@ -505,6 +616,10 @@ if (HasAdminAccess(LoginUserRole) != true) {
     for (var Name in AdminTabButtons) {
       if (Name == TabName) {
         setCSS(AdminTabButtons[Name], "background-color", ThemeColor);
+        if (AdminIsMobileLayout) {
+          var ActiveButton = AdminTabButtons[Name];
+          AdminNav.scrollLeft = ActiveButton.offsetLeft - AdminNav.offsetLeft - (AdminNav.clientWidth - ActiveButton.offsetWidth) / 2;
+        }
       } else {
         setCSS(AdminTabButtons[Name], "background-color", ContentColorLayer3);
       }
@@ -585,8 +700,8 @@ if (HasAdminAccess(LoginUserRole) != true) {
       for (var i = 0; i < StatCards.length; i++) {
         var Card = createElement(AdminID("AdminStatCard"), "div", Cards, [
           ["box-sizing", "border-box"],
-          ["width", "calc(25% - 8px)"],
-          ["min-width", "120px"],
+          ["width", AdminIsMobileLayout ? "calc(50% - 8px)" : "calc(25% - 8px)"],
+          ["min-width", AdminIsMobileLayout ? "0px" : "120px"],
           ["margin", "4px"],
           ["padding", "8px 10px"],
           ["background-color", ContentColorLayer3],
@@ -602,11 +717,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
 
       var ActivitySection = AdminSection(AdminContentPane, "Last 7 Days", "New users, posts and chats per day.");
       var ActivityRows = Data.Activity || [];
-      var ActivityHeader = AdminRow(ActivitySection, ["16%", "28%", "28%", "28%"]);
-      AdminCell(ActivityHeader, 0, "Date", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(ActivityHeader, 1, "Users", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(ActivityHeader, 2, "Posts", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(ActivityHeader, 3, "Chats", [["color", "#aaaaaa"], ["font-weight", "900"]]);
+      AdminTableHeader(ActivitySection, ["16%", "28%", "28%", "28%"], ["Date", "Users", "Posts", "Chats"]);
       for (var a = 0; a < ActivityRows.length; a++) {
         var ActivityRow = AdminRow(ActivitySection, ["16%", "28%", "28%", "28%"]);
         AdminCell(ActivityRow, 0, ActivityRows[a].Date);
@@ -620,7 +731,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
         AdminText(TopSection, "No posts this week.", [["font-size", "14px"], ["color", "#aaaaaa"], ["font-family", FontTypeA]]);
       } else {
         for (var t = 0; t < Data.TopPosters.length; t++) {
-          var PosterRow = AdminRow(TopSection, ["50%", "25%", "25%"]);
+          var PosterRow = AdminRow(TopSection, ["50%", "25%", "25%"], ["Poster", "Role", "Posts"]);
           AdminCell(PosterRow, 0, Data.TopPosters[t].User);
           AdminCell(PosterRow, 1, Data.TopPosters[t].Role || "User");
           AdminCell(PosterRow, 2, String(Data.TopPosters[t].Count) + " posts");
@@ -632,7 +743,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
         AdminText(ActionsSection, "No staff actions recorded yet.", [["font-size", "14px"], ["color", "#aaaaaa"], ["font-family", FontTypeA]]);
       } else {
         for (var r = 0; r < Data.RecentActions.length; r++) {
-          var ActionRow = AdminRow(ActionsSection, ["22%", "26%", "30%", "22%"]);
+          var ActionRow = AdminRow(ActionsSection, ["22%", "26%", "30%", "22%"], ["Actor", "Action", "Target", "When"]);
           AdminCell(ActionRow, 0, Data.RecentActions[r].Actor);
           AdminCell(ActionRow, 1, Data.RecentActions[r].Action);
           AdminCell(ActionRow, 2, Data.RecentActions[r].Target || "—");
@@ -701,13 +812,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
     }, function (Data) {
       if (AdminState.Tab != "Users" || AdminState.UserID != null) return;
       AdminClear(ListSection);
-      var HeaderRow = AdminRow(ListSection, ["26%", "20%", "12%", "10%", "10%", "22%"]);
-      AdminCell(HeaderRow, 0, "User", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 1, "Email", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 2, "Role", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 3, "Posts", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 4, "Chats", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 5, "Last Seen", [["color", "#aaaaaa"], ["font-weight", "900"]]);
+      AdminTableHeader(ListSection, ["26%", "20%", "12%", "10%", "10%", "22%"], ["User", "Email", "Role", "Posts", "Chats", "Last Seen"]);
 
       if ((Data.Users || []).length == 0) {
         AdminText(ListSection, "No users matched those filters.", [["font-size", "15px"], ["font-family", FontTypeA], ["color", "#aaaaaa"], ["margin-top", "6px"]]);
@@ -882,7 +987,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
     ];
     for (var s = 0; s < StatPairs.length; s++) {
       var StatBox = createElement(AdminID("AdminUserStat"), "div", StatsHolder, [
-        ["box-sizing", "border-box"], ["width", "calc(33% - 8px)"], ["min-width", "110px"],
+        ["box-sizing", "border-box"], ["width", AdminIsMobileLayout ? "calc(50% - 8px)" : "calc(33% - 8px)"], ["min-width", AdminIsMobileLayout ? "0px" : "110px"],
         ["margin", "4px"], ["padding", "6px 8px"], ["background-color", ContentColorLayer3], ["border-radius", "8px"]
       ]);
       AdminText(StatBox, StatPairs[s][1] == null ? 0 : StatPairs[s][1], [
@@ -899,7 +1004,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
     }
     for (var p = 0; p < (Data.Posts || []).length; p++) {
       var Post = Data.Posts[p];
-      var PostRow = AdminRow(PostsSection, ["55%", "15%", "15%", "15%"]);
+      var PostRow = AdminRow(PostsSection, ["55%", "15%", "15%", "15%"], ["Post", "Likes", "Chats", "When"]);
       AdminCell(PostRow, 0, Post.Text);
       AdminCell(PostRow, 1, String(Post.Likes) + " likes");
       AdminCell(PostRow, 2, String(Post.Chats) + " chats");
@@ -912,7 +1017,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
     }
     for (var c = 0; c < (Data.Chats || []).length; c++) {
       var Chat = Data.Chats[c];
-      var ChatRow = AdminRow(ChatsSection, ["55%", "15%", "15%", "15%"]);
+      var ChatRow = AdminRow(ChatsSection, ["55%", "15%", "15%", "15%"], ["Chat", "Likes", "Status", "When"]);
       AdminCell(ChatRow, 0, Chat.Text);
       AdminCell(ChatRow, 1, String(Chat.Likes) + " likes");
       AdminCell(ChatRow, 2, Chat.Removed == true ? "Hidden" : "Visible");
@@ -924,7 +1029,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
       AdminText(SessionsSection, "No sessions.", [["font-size", "14px"], ["color", "#aaaaaa"], ["font-family", FontTypeA]]);
     }
     for (var se = 0; se < (Data.Sessions || []).length; se++) {
-      var SessionRow = AdminRow(SessionsSection, ["38%", "22%", "22%", "18%"]);
+      var SessionRow = AdminRow(SessionsSection, ["38%", "22%", "22%", "18%"], ["IP", "Count", "Last Seen", "Actions"]);
       AdminCell(SessionRow, 0, Data.Sessions[se].IP);
       AdminCell(SessionRow, 1, String(Data.Sessions[se].Count) + " sessions");
       AdminCell(SessionRow, 2, "Last: " + AdminTime(Data.Sessions[se].LastSeen));
@@ -982,12 +1087,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
     }, function (Data) {
       if (AdminState.Tab != "Content") return;
       AdminClear(ListSection);
-      var HeaderRow = AdminRow(ListSection, ["44%", "16%", "12%", "14%", "14%"]);
-      AdminCell(HeaderRow, 0, "Text", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 1, "Author", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 2, "Likes", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 3, "Created", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 4, "Actions", [["color", "#aaaaaa"], ["font-weight", "900"]]);
+      AdminTableHeader(ListSection, ["44%", "16%", "12%", "14%", "14%"], ["Text", "Author", "Likes", "Created", "Actions"]);
 
       if ((Data.Items || []).length == 0) {
         AdminText(ListSection, "No content matched those filters.", [["font-size", "15px"], ["font-family", FontTypeA], ["color", "#aaaaaa"], ["margin-top", "6px"]]);
@@ -1352,13 +1452,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
     }, function (Data) {
       if (AdminState.Tab != "Sessions") return;
       AdminClear(ListSection);
-      var HeaderRow = AdminRow(ListSection, ["20%", "20%", "12%", "20%", "20%", "8%"]);
-      AdminCell(HeaderRow, 0, "User", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 1, "IP", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 2, "Count", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 3, "Last Seen", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 4, "Expires", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 5, "", []);
+      AdminTableHeader(ListSection, ["20%", "20%", "12%", "20%", "20%", "8%"], ["User", "IP", "Count", "Last Seen", "Expires", "Actions"]);
 
       if ((Data.Sessions || []).length == 0) {
         AdminText(ListSection, "No sessions matched.", [["font-size", "15px"], ["font-family", FontTypeA], ["color", "#aaaaaa"], ["margin-top", "6px"]]);
@@ -1406,12 +1500,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
     AdminRequest("AdminLog", {}, function (Data) {
       if (AdminState.Tab != "Audit Log") return;
       AdminClear(ListSection);
-      var HeaderRow = AdminRow(ListSection, ["18%", "20%", "20%", "14%", "28%"]);
-      AdminCell(HeaderRow, 0, "Actor", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 1, "Action", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 2, "Target", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 3, "When", [["color", "#aaaaaa"], ["font-weight", "900"]]);
-      AdminCell(HeaderRow, 4, "Details", [["color", "#aaaaaa"], ["font-weight", "900"]]);
+      AdminTableHeader(ListSection, ["18%", "20%", "20%", "14%", "28%"], ["Actor", "Action", "Target", "When", "Details"]);
 
       if ((Data.Log || []).length == 0) {
         AdminText(ListSection, "No staff actions recorded yet.", [["font-size", "15px"], ["font-family", FontTypeA], ["color", "#aaaaaa"], ["margin-top", "6px"]]);
@@ -1436,7 +1525,7 @@ if (HasAdminAccess(LoginUserRole) != true) {
     AdminButton(UpdateSection, "Update All Clients", "#FF5C5C", function () {
       AdminConfirm("Push update to all clients?", "Every connected client will be prompted and then reloaded. Unsaved input will be lost.", "Update All Clients", function () {
         AdminRequest("AdminBroadcast", {
-          Mode: "Reload", Message: "Photop has been updated. Reloading…", Level: "info"
+          Mode: "Reload", Message: "Memblu has been updated. Reloading…", Level: "info"
         }, function (Result) {
           AdminNotice("Update pushed to " + (Result.Delivered || 0) + " clients.");
         });

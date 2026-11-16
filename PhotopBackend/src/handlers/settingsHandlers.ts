@@ -11,6 +11,7 @@ export function handleUpdateAccountData(body: any, currentUser: UserRecord | nul
   let newUsername = currentUser.user;
   let newEmail = currentUser.email;
   let newPassHash = currentUser.password_hash;
+  let newCustomURL = currentUser.custom_url || null;
 
   for (const item of Update) {
     if (item.Change === "Password") {
@@ -26,6 +27,26 @@ export function handleUpdateAccountData(body: any, currentUser: UserRecord | nul
           newUsername = u;
         }
       }
+    } else if (item.Change === "CustomURL") {
+      const requested = typeof item.CustomURL === "string" ? item.CustomURL.trim() : "";
+      if (requested === "") {
+        // Clearing it falls back to sharing the account's user ID.
+        newCustomURL = null;
+      } else {
+        if (requested.length < 3 || requested.length > 20 || !/^[A-Za-z0-9_-]+$/.test(requested)) {
+          return { Code: 400, Message: "Profile URLs must be 3-20 characters and can only contain letters, numbers, underscores and hyphens." };
+        }
+        // Avoid shadows: a custom URL must not equal another account's
+        // existing ID, username or custom URL (all compared case-insensitively).
+        const conflict = db.prepare(`
+          SELECT id FROM users
+          WHERE id != ? AND (custom_url = ? COLLATE NOCASE OR user_lower = ? OR id = ?)
+        `).get(currentUser.id, requested, requested.toLowerCase(), requested);
+        if (conflict) {
+          return { Code: 409, Message: "That profile URL is already taken." };
+        }
+        newCustomURL = requested;
+      }
     } else if (item.Change === "Email" && item.Email) {
       newEmail = item.Email.trim().toLowerCase();
     } else if (item.Change === "ProfileDescription") {
@@ -37,11 +58,12 @@ export function handleUpdateAccountData(body: any, currentUser: UserRecord | nul
 
   db.prepare(`
     UPDATE users
-    SET user = ?, user_lower = ?, email = ?, password_hash = ?, settings = ?, profile_data = ?
+    SET user = ?, user_lower = ?, custom_url = ?, email = ?, password_hash = ?, settings = ?, profile_data = ?
     WHERE id = ?
   `).run(
     newUsername,
     newUsername.toLowerCase(),
+    newCustomURL,
     newEmail,
     newPassHash,
     JSON.stringify(settings),
@@ -51,7 +73,8 @@ export function handleUpdateAccountData(body: any, currentUser: UserRecord | nul
 
   return {
     Code: 200,
-    Settings: settings
+    Settings: settings,
+    CustomURL: newCustomURL
   };
 }
 

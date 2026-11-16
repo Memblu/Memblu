@@ -1,5 +1,5 @@
 
-SetPageTitle("Moderation | Photop");
+SetPageTitle("Moderation");
 
 var BackBlur = createElement("BackBlur", "div", "body", [
     ["position", "fixed"],
@@ -59,7 +59,7 @@ createElement("Description", "div", Frame, [
     ["font-weight", "500"],
     ["color", FontColorA],
     ["text-align", "left"]
-]).innerHTML = "Type why and select how long you want to ban <b>" + SelectedModerationData.User + "</b> from Photop.";
+]).innerHTML = "Type why and select how long you want to ban <b>" + SelectedModerationData.User + "</b> from Memblu.";
 
 var BanReasonTextBox = createElement("BanReasonTextBox", "div", Frame, [
     ["position", "relative"],
@@ -232,7 +232,7 @@ createElement("Description", "div", Frame, [
     ["font-weight", "500"],
     ["color", FontColorA],
     ["text-align", "left"]
-]).innerHTML = "Do you want to terminate the account <b>" + SelectedModerationData.User + "</b> from Photop. This will forever stop the account from being logged into and also hide all content. <i>(Check this for example if their name is inappropriate)</i>";
+]).innerHTML = "Do you want to terminate the account <b>" + SelectedModerationData.User + "</b> from Memblu. This will forever stop the account from being logged into and also hide all content. <i>(Check this for example if their name is inappropriate)</i>";
 
 CreateReportButton("Terminate", "Terminate");
 

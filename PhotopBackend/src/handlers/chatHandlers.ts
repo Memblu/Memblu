@@ -119,10 +119,13 @@ export function handleCreateChat(
   return { Code: 200 };
 }
 
+export type BroadcastUpdatedChat = (postId: string, chatId: string, text: string, editedAt: number) => void;
+
 export function handleUpdateChat(
   body: any,
   currentUser: UserRecord | null,
-  broadcastDeleted: (postId: string, chatId: string) => void
+  broadcastDeleted: (postId: string, chatId: string) => void,
+  broadcastUpdated?: BroadcastUpdatedChat
 ): any {
   if (!currentUser) {
     return { Code: 401, Message: "Not authenticated." };
@@ -139,6 +142,29 @@ export function handleUpdateChat(
 
   if (!isAuthor && !canMod) {
     return { Code: 403, Message: "Permission denied." };
+  }
+
+  if (body.Task === "Edit") {
+    if (!isAuthor) {
+      return { Code: 403, Message: "You can only edit your own chats." };
+    }
+    if (chat.hidden === 1) {
+      return { Code: 404, Message: "Chat not found." };
+    }
+    const Text = typeof body.Text === "string" ? body.Text.trim() : null;
+    if (!Text) {
+      return { Code: 400, Message: "Message cannot be empty." };
+    }
+    if (Text.length > 200) {
+      return { Code: 400, Message: "Chats can be up to 200 characters long." };
+    }
+
+    const editedAt = Date.now();
+    db.prepare("UPDATE chats SET text = ?, edited_at = ? WHERE id = ?").run(Text, editedAt, ChatID);
+    if (broadcastUpdated) {
+      broadcastUpdated(chat.post_id, ChatID, Text, editedAt);
+    }
+    return { Code: 200, ChatID, PostID: chat.post_id, Text, EditedAt: editedAt };
   }
 
   db.prepare("UPDATE chats SET hidden = 1 WHERE id = ?").run(ChatID);
@@ -276,7 +302,8 @@ export function formatChatResponse(chatRows: ChatRecord[], currentUser: UserReco
     Timestamp: c.timestamp,
     ReplyID: c.reply_id || undefined,
     Likes: c.likes || 0,
-    IsLiked: likedChatIds.has(c.id)
+    IsLiked: likedChatIds.has(c.id),
+    EditedAt: c.edited_at || null
   }));
 
   return {

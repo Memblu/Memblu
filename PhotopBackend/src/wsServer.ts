@@ -181,12 +181,49 @@ export function createWebSocketServer(server: any) {
     }
   }
 
+  function broadcastUpdatedChat(postId: string, chatId: string, text: string, editedAt: number) {
+    const packet = JSON.stringify({
+      Metadata: { ReqSource: "Server" },
+      Body: {
+        ClientFunction: "ChatUpdated",
+        PostID: postId,
+        ChatID: chatId,
+        Text: text,
+        EditedAt: editedAt
+      }
+    });
+
+    for (const s of allSockets) {
+      if (s.readyState === WebSocket.OPEN) {
+        s.send(packet);
+      }
+    }
+  }
+
   function broadcastDeletedChat(postId: string, chatId: string) {
     const packet = JSON.stringify({
       Metadata: { ReqSource: "Server" },
       Body: {
         ClientFunction: "NewChatDeleted",
         ChatIDs: [chatId]
+      }
+    });
+
+    for (const s of allSockets) {
+      if (s.readyState === WebSocket.OPEN) {
+        s.send(packet);
+      }
+    }
+  }
+
+  function broadcastUpdatedPost(postId: string, text: string, editedAt: number) {
+    const packet = JSON.stringify({
+      Metadata: { ReqSource: "Server" },
+      Body: {
+        ClientFunction: "PostUpdated",
+        PostID: postId,
+        Text: text,
+        EditedAt: editedAt
       }
     });
 
@@ -371,7 +408,7 @@ export function createWebSocketServer(server: any) {
             result = handleCreatePost(Body, currentUser, broadcastNewPost);
             break;
           case "UpdatePost":
-            result = handleUpdatePost(Body, currentUser, broadcastDeletedPost);
+            result = handleUpdatePost(Body, currentUser, broadcastDeletedPost, broadcastUpdatedPost);
             break;
           case "LikePost":
             result = handleLikePost(Body, currentUser, broadcastPostLikes);
@@ -396,7 +433,7 @@ export function createWebSocketServer(server: any) {
             }
             break;
           case "UpdateChat":
-            result = handleUpdateChat(Body, currentUser, broadcastDeletedChat);
+            result = handleUpdateChat(Body, currentUser, broadcastDeletedChat, broadcastUpdatedChat);
             break;
           case "LikeChat":
             result = handleLikeChat(Body, currentUser, broadcastChatLikes);

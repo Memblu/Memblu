@@ -43,7 +43,7 @@ createElement("Title", "div", Frame, [
     ["font-weight", "900"],
     ["color", FontColorA],
     ["text-align", "left"]
-]).textContent = "Banned From Photop";
+]).textContent = "Banned From Memblu";
 
 var BanDescription = createElement("Description", "div", Frame, [
     ["position", "relative"],
@@ -92,7 +92,7 @@ if (CaclTimestamp != "Permanent") {
 createElement("BanExpires", "div", Frame, BanInfoCSS).innerHTML = "<b>Expires:</b> " + CaclTimestamp;
 
 if (BanData.Appealed == false) {
-  BanDescription.innerHTML = "Oh no! It appears you have broken a Photop rule resulting in your account being banned. If you believe this to be a mistake, please let us know by writing an <b>Appeal</b> in the box below. Also note that you may only send 1 appeal.";
+  BanDescription.innerHTML = "Oh no! It appears you have broken a Memblu rule resulting in your account being banned. If you believe this to be a mistake, please let us know by writing an <b>Appeal</b> in the box below. Also note that you may only send 1 appeal.";
 
   var BanAppealTextBox = createElement("BanAppealTextBox", "div", Frame, [
       ["position", "relative"],
@@ -157,7 +157,7 @@ if (BanData.Appealed == false) {
       ["color", "#bbbbbb"],
       ["text-align", "left"]
   ]);
-  AppealDescription.innerHTML = "<b>Important:</b> Your appeal will be sent to Photop moderation. Please try to be professional and include as much information as possible.";
+  AppealDescription.innerHTML = "<b>Important:</b> Your appeal will be sent to Memblu moderation. Please try to be professional and include as much information as possible.";
 
   var ButtonHolder = createElement("ButtonHolder", "div", Frame, [
       ["position", "relative"],
@@ -210,7 +210,7 @@ if (BanData.Appealed == false) {
     AppealBanButton.remove();
   });
 } else {
-  BanDescription.innerHTML = "Oh no! It appears you have broken a Photop rule resulting in your account being banned.";
+  BanDescription.innerHTML = "Oh no! It appears you have broken a Memblu rule resulting in your account being banned.";
 
   var ButtonHolder = createElement("ButtonHolder", "div", Frame, [
       ["position", "relative"],

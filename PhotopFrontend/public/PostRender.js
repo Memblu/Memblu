@@ -144,11 +144,18 @@ async function CreatePostButtons(ID, Data, UserData, PostContainer, IsLikingPost
   if (MobileVersion == true) {
     ButtonHolderWidth = "100%";
   }
+  // On mobile the chat panel is hidden, so a hint bar at the bottom of the card
+  // tells readers to tap through to the full-screen chat view.
+  var MobileHintHeight = 0;
+  if (MobileVersion == true) {
+    MobileHintHeight = 26;
+  }
+
   var PostButtonHolder = createElement(ID + "PostButtonHolder", "div", PostContainer, [
       ["position", "absolute"],
       ["display", "inline-block"],
       ["z-index", "10"],
-      ["bottom", "12px"],
+      ["bottom", (12 + MobileHintHeight) + "px"],
       ["width", ButtonHolderWidth],
       ["height", "20px"],
       ["text-align", "left"],
@@ -367,6 +374,208 @@ async function CreatePostButtons(ID, Data, UserData, PostContainer, IsLikingPost
   }
 }
 
+// Formats post text the same way the timeline does. Shared so an edited post
+// can be re-rendered in place on every client without rebuilding the card.
+function BuildPostTextHTML(Text) {
+    var EmbedLink = null;
+    var PreviewEmbedLink = null;
+    var Embeds = [];
+
+    // GENERATE TEXT:
+    var StandardText = CleanString(Text);
+  
+    //StandardText = StandardText.replaceAll("&", "&#38;");
+    //StandardText = StandardText.replaceAll("$", "&#36;");
+    StandardText = StandardText.replace(/\?/g, "&#63;");
+    //StandardText = StandardText.replaceAll("#", "&#35;");
+    StandardText = StandardText.replace(/\=/g, "&#61;");
+
+    //StandardText = StandardText.replaceAll("&#160;", "test");
+
+    // XSS Protection:
+    StandardText = StandardText.replace(/\</g, "&#60;");
+    StandardText = StandardText.replace(/\>/g, "&#62;");
+    var NewHTML = "";
+
+    var ContainedOne = true;
+    while (ContainedOne == true) {
+      ContainedOne = false;
+      var SortedOrder = [];
+      for (var f = 0; f < HighlightKeys.length; f++) {
+        var Index = StandardText.indexOf(HighlightKeys[f]);
+        if (Index != -1) {
+          ContainedOne = true;
+          SortedOrder.push([Index,HighlightKeys[f]]);
+        }
+      }
+
+      SortedOrder = SortedOrder.sort(function(a, b) {
+        return a[0] - b[0];
+      });
+
+      for (var i = 0; i < SortedOrder.length; SortedOrder++) {
+        //var Index = SortedOrder[i][0];
+        var Search = SortedOrder[i][1];
+        var Index = StandardText.indexOf(Search);
+        var IndexSort = StandardText.replace(/ /g, " ").replace(/ /g, " ").replace(/&nbsp;/g, " ").replace(/‎/g, " ").replace(/&#x0020;/g, " ").replace(/\t/g, " ").replace(/\r/g, " ").replace(/\v/g, " ").replace(/\f/g, " ").replace(/\n/g, " ");
+
+        var CheckIndexFor = " ";
+        if (HighlightChars[Search].EndChar != null) {
+          CheckIndexFor = HighlightChars[Search].EndChar;
+        }
+        var EndIndex = IndexSort.indexOf(CheckIndexFor, Index+1);
+
+        if (EndIndex < 0) {
+          EndIndex = StandardText.length;
+        }
+
+        var DollarKeyIndex = IndexSort.indexOf("$", Index+1);
+        if (DollarKeyIndex > -1 && DollarKeyIndex < EndIndex) {
+          EndIndex = DollarKeyIndex;
+        }
+
+        if (HighlightChars[Search].OtherEndings == true) {
+          for (var e = 0; e < OtherEnds.length; e++) {
+            var CheckIndex = IndexSort.indexOf(OtherEnds[e], Index+1);
+            if (CheckIndex > 0 && CheckIndex < EndIndex) {
+              EndIndex = CheckIndex;
+              break;
+            }
+          }
+        }
+
+        var SearchIndex = Index;
+        var SearchEndIndex = EndIndex;
+
+        if (HighlightChars[Search].IncludeKeys != null && HighlightChars[Search].IncludeKeys == false) {
+          SearchIndex += Search.length;
+          EndIndex += HighlightChars[Search].EndChar.length;
+        }
+
+        var TextAdd = StandardText.substring(SearchIndex, SearchEndIndex); // Get just the highlighted string
+
+        if (HighlightChars[Search].MustInclude == null || TextAdd.includes(HighlightChars[Search].MustInclude) == true) {
+          // Add the string before the search:
+          NewHTML += StandardText.substring(0, Index);
+
+          var StyleType = HighlightChars[Search].Type;
+          var SetStyle = HighlightChars[Search].Style;
+
+          var TagSet = HighlightChars[Search].Tag || "span";
+
+          var AddHTMLStart = '<' + TagSet + ' ';
+          var AddHTMLEnd = "</" + TagSet + ">";
+        
+          var AnyExtra = "";
+        
+          if (StyleType == "Mention" ) {
+
+            var StartSnip = TextAdd.indexOf("&#60;")+5;
+            var UserCutID = TextAdd.substring(StartSnip, TextAdd.indexOf("&#62;", StartSnip+23));
+            var RealUsernameText = TextAdd.substring(0, TextAdd.indexOf("&#60;"));
+
+            if (UserCutID.length == 24 && RealUsernameText.length > 0) {
+              TextAdd = RealUsernameText;
+              AddHTMLStart += 'loaduserid="' + UserCutID + '" ';
+            } else {
+              StyleType = null;
+              SetStyle = "";
+            }
+            /*
+            AddHTMLStart += 'title="You Where Mentioned!" ';
+            AnyExtra += " background-color: #A41F2A";
+            */
+          }
+
+          // Add the new InnerHTML:
+          AddHTMLStart += 'style="' + SetStyle + AnyExtra + '"';
+        
+          if (StyleType == "Quote") {
+            Embeds.push(["Post", TextAdd.substring(6)]);
+          }
+          if (StyleType == "ChatLoad") {
+            Embeds.push(["Chat", TextAdd.substring(6)]);
+          }
+
+          if (StyleType != null && (HighlightChars[Search].IncludeKeys == null || HighlightChars[Search].IncludeKeys == true)) {
+            if (StyleType == "Link") {
+              AddHTMLStart += ' onMouseOver="this.style.textDecoration = ' + "'underline'" + '" onMouseOut="this.style.textDecoration = ' + "'none'" + '"';
+              if (TextAdd.substring(0, 4) != "http") {
+                TextAdd = "https://" + TextAdd;
+              }
+              if (TextAdd.includes("https://www.youtube.com/") == true || TextAdd.includes("https://youtu.be/") == true) {
+                if (UserDisplaySettings["Embed YouTube Videos"] == true) {
+                  EmbedLink = TextAdd;
+                }
+              }
+              if (TextAdd.includes("https://www.twitch.tv/") == true) {
+                if (UserDisplaySettings["Embed Twitch Streams"] == true || UserDisplaySettings["Embed Twitch Live Chat"] == true) {
+                  EmbedLink = TextAdd;
+                }
+              }
+              if (TextAdd.includes("https://studio.code.org/projects/") == true) {
+                if (UserDisplaySettings["Embed code.org Projects"] == true) {
+                  EmbedLink = TextAdd;
+                }
+              }
+              if (TextAdd.includes("https://scratch.mit.edu/projects/") == true) {
+                if (UserDisplaySettings["Embed Scratch Games"] == true) {
+                  EmbedLink = TextAdd;
+                }
+              }
+              if (TextAdd.substring(TextAdd.length-4) == ".gif" || TextAdd.substring(TextAdd.length-4) == ".mp4") {
+                if (UserDisplaySettings["Embed GIFs"] == true) {
+                  EmbedLink = TextAdd;
+                }
+              }
+              if (EmbedLink == null) {
+                PreviewEmbedLink = TextAdd;
+              }
+            } else { // || TextAdd != ("@" + Username).trim()) {
+              AddHTMLStart += ' onMouseOver="this.style.backgroundColor = ' + "adjust(this.style.color, 75)" + '" onMouseOut="this.style.backgroundColor = ' + "'rgba(255, 255, 255, 0)'" + '"';
+            }
+
+            AddHTMLStart += ' typerender="' + StyleType + '"';
+          }
+          AddHTMLStart += ' textspan="">';
+
+          NewHTML += AddHTMLStart + TextAdd + AddHTMLEnd;
+        
+          StandardText = StandardText.substring(EndIndex);
+        } else {
+          if (TextAdd.includes(HighlightChars[Search].MustInclude) == false) {
+            NewHTML += StandardText.substring(0, EndIndex);
+            StandardText = StandardText.substring(EndIndex);
+          }
+        }
+      }
+    }
+    NewHTML += StandardText;
+
+    //NewHTML = NewHTML.replaceAll("    ", "<br/><br/>");
+    //NewHTML = NewHTML.replaceAll("  ", "<br/>");
+    NewHTML = NewHTML.replace(/\$\[NEWLINE\]\;/g, "<br/>").replace(/\$\[NEWLINE\]/g, "<br/>");
+
+    /*
+    var brFound = findAllIndexes(NewHTML, "<br/><br/>");
+    if (brFound.length > 0 && NewHTML.substring(brFound[brFound.length-1]-5, brFound[brFound.length-1]) != "<br/>") {
+      NewHTML = NewHTML.substring(0, brFound[brFound.length-1]) + NewHTML.substring(brFound[brFound.length-1]+10);
+      NewHTML += "<br/>";
+    }
+    */
+
+    /*
+    var re = new RegExp(String.fromCharCode(160), "g");
+    NewHTML = NewHTML.replace(re, " ");
+    */
+  return {
+    HTML: NewHTML,
+    EmbedLink: EmbedLink,
+    PreviewEmbedLink: PreviewEmbedLink,
+    Embeds: Embeds
+  };
+}
+
 async function CreatePostView(ID, Data, UserData, Parent, IsLikingPost, IsLikeData) {
   if (ID == null || Data == null || UserData == null || Parent == null) {
     return;
@@ -415,7 +624,7 @@ async function CreatePostView(ID, Data, UserData, Parent, IsLikingPost, IsLikeDa
   createElement("Spacer", "div", Post, [
       ["position", "relative"],
       ["width", "100%"],
-      ["height", "40px"]
+      ["height", MobileVersion == true ? "66px" : "40px"]
   ]);
   createElement(ID + "ProfilePic", "div", PostInfo, [
       ["position", "absolute"],
@@ -487,6 +696,7 @@ async function CreatePostView(ID, Data, UserData, Parent, IsLikingPost, IsLikeDa
   if (CurrentPage == "Profile" && ProfileUserData != null && ProfileUserData.ProfileData != null && ProfileUserData.ProfileData.PinnedPost == ID) {
     PinnedText = " (Pinned)";
   }
+  var EditedText = Data.EditedAt != null ? " (edited)" : "";
   var PostInfo = createElement(ID + "PostInfo", "div", PostInfo, [
       ["position", "relative"],
       ["max-width", "calc(100% - 70px)"],
@@ -504,8 +714,8 @@ async function CreatePostView(ID, Data, UserData, Parent, IsLikingPost, IsLikeDa
       ["text-overflow", "ellipsis"],
       ["overflow", "hidden"]
   ]);
-  PostInfo.textContent = TimeToSet + " " + End + " Ago" + PinnedText;
-  PostInfo.setAttribute("title", "Posted: " + new Date(Data.Timestamp) + PinnedText);
+  PostInfo.textContent = TimeToSet + " " + End + " Ago" + EditedText + PinnedText;
+  PostInfo.setAttribute("title", "Posted: " + new Date(Data.Timestamp) + PinnedText + EditedText);
 
   var PostText = createElement(ID + "TextHolder", "div", PostContent, [
       ["position", "relative"],
@@ -564,6 +774,40 @@ async function CreatePostView(ID, Data, UserData, Parent, IsLikingPost, IsLikeDa
   //HasLikedPost(ID, Data, PostContainer);
   //CreatePostButtons();
   CreatePostButtons(ID, Data, UserData, PostContainer, IsLikingPost, null, IsLikeData);
+
+  if (MobileVersion == true) {
+    var MobileChatHint = createElement(ID + "MobileChatHint", "div", PostContainer, [
+        ["position", "absolute"],
+        ["display", "flex"],
+        ["align-items", "center"],
+        ["justify-content", "center"],
+        ["box-sizing", "border-box"],
+        ["left", "12px"],
+        ["bottom", "6px"],
+        ["width", "calc(100% - 24px)"],
+        ["height", "22px"],
+        ["z-index", "11"],
+        ["background-color", ThemeColor],
+        ["border-radius", "8px"],
+        ["cursor", "pointer"],
+
+        // Text:
+        ["font-size", "13px"],
+        ["font-family", FontTypeA],
+        ["font-weight", "900"],
+        ["color", "#ffffff"],
+        ["text-align", "center"],
+        ["white-space", "nowrap"],
+        ["overflow", "hidden"],
+        ["text-overflow", "ellipsis"]
+    ]);
+    MobileChatHint.textContent = "Click post to view chats and reply.";
+    MobileChatHint.setAttribute("title", "Click post to view chats and reply.");
+    MobileChatHint.addEventListener("click", function(event) {
+      event.stopPropagation();
+      OpenMobileChat(ID);
+    });
+  }
   
   var Chat = createElement(ID + "LiveChat", "div", PostContainer, [
       ["position", "absolute"],
@@ -722,8 +966,16 @@ async function CreatePostView(ID, Data, UserData, Parent, IsLikingPost, IsLikeDa
   ChatBox.setAttribute("title", "Create Chat");
   ChatBox.textContent = "Time to Chat";
   ChatBox.addEventListener("keydown", function(event) {
-    if (event.key == "Enter") {
+    // Enter sends on every keyboard, including mobile ones that do not repeat
+    // keyup events. Shift+Enter stays blocked so a chat can never gain a stray
+    // newline. This is scoped to the chat box, not the post composer.
+    if (event.key == "Enter" && event.shiftKey == false && event.isComposing != true) {
       event.preventDefault();
+      SendChatAction();
+      if (ChatBox.textContent != "Time to Chat") {
+        ChatBox.textContent = "";
+        setCSS(ChatBox, "color", FontColorA);
+      }
     }
   });
   ChatBox.addEventListener("focus", function(e) {
@@ -806,209 +1058,40 @@ async function CreatePostView(ID, Data, UserData, Parent, IsLikingPost, IsLikeDa
       ReplyFrame.remove();
     }
     SendChat(SendChatData, PreviewExtras);
+    if (MobileVersion == true && MobilePostView != null && MobilePostView.ID == ID) {
+      setTimeout(function () {
+        ScrollMobileChatToBottom(true);
+      }, 120);
+    }
+  }
+  if (MobileVersion == true) {
+    // Keep the keyboard up when tapping Chat instead of blurring the input.
+    SendChatButton.addEventListener("mousedown", function(event) {
+      event.preventDefault();
+    });
   }
   SendChatButton.addEventListener("click", function() {
     SendChatAction();
-    ChatBox.textContent = "Time to Chat";
-    setCSS(ChatBox, "color", "#aaaaaa");
-  });
-  ChatBox.addEventListener("keyup", function(event) {
-    if (event.which === 13 && event.shiftKey === false) {
-      SendChatAction();
+    if (document.activeElement == ChatBox) {
+      // Keep typing with the keyboard still open.
       ChatBox.textContent = "";
+      setCSS(ChatBox, "color", FontColorA);
+    } else {
+      ChatBox.textContent = "Time to Chat";
+      setCSS(ChatBox, "color", "#aaaaaa");
     }
   });
 
-  var EmbedLink = null;
-  var PreviewEmbedLink = null;
 
   // GENERATE TEXT:
-  var StandardText = CleanString(Data.Text);
-  
-  //StandardText = StandardText.replaceAll("&", "&#38;");
-  //StandardText = StandardText.replaceAll("$", "&#36;");
-  StandardText = StandardText.replace(/\?/g, "&#63;");
-  //StandardText = StandardText.replaceAll("#", "&#35;");
-  StandardText = StandardText.replace(/\=/g, "&#61;");
-
-  //StandardText = StandardText.replaceAll("&#160;", "test");
-
-  // XSS Protection:
-  StandardText = StandardText.replace(/\</g, "&#60;");
-  StandardText = StandardText.replace(/\>/g, "&#62;");
-  var NewHTML = "";
-
-  var ContainedOne = true;
-  while (ContainedOne == true) {
-    ContainedOne = false;
-    var SortedOrder = [];
-    for (var f = 0; f < HighlightKeys.length; f++) {
-      var Index = StandardText.indexOf(HighlightKeys[f]);
-      if (Index != -1) {
-        ContainedOne = true;
-        SortedOrder.push([Index,HighlightKeys[f]]);
-      }
-    }
-
-    SortedOrder = SortedOrder.sort(function(a, b) {
-      return a[0] - b[0];
-    });
-
-    for (var i = 0; i < SortedOrder.length; SortedOrder++) {
-      //var Index = SortedOrder[i][0];
-      var Search = SortedOrder[i][1];
-      var Index = StandardText.indexOf(Search);
-      var IndexSort = StandardText.replace(/ /g, " ").replace(/ /g, " ").replace(/&nbsp;/g, " ").replace(/‎/g, " ").replace(/&#x0020;/g, " ").replace(/\t/g, " ").replace(/\r/g, " ").replace(/\v/g, " ").replace(/\f/g, " ").replace(/\n/g, " ");
-
-      var CheckIndexFor = " ";
-      if (HighlightChars[Search].EndChar != null) {
-        CheckIndexFor = HighlightChars[Search].EndChar;
-      }
-      var EndIndex = IndexSort.indexOf(CheckIndexFor, Index+1);
-
-      if (EndIndex < 0) {
-        EndIndex = StandardText.length;
-      }
-
-      var DollarKeyIndex = IndexSort.indexOf("$", Index+1);
-      if (DollarKeyIndex > -1 && DollarKeyIndex < EndIndex) {
-        EndIndex = DollarKeyIndex;
-      }
-
-      if (HighlightChars[Search].OtherEndings == true) {
-        for (var e = 0; e < OtherEnds.length; e++) {
-          var CheckIndex = IndexSort.indexOf(OtherEnds[e], Index+1);
-          if (CheckIndex > 0 && CheckIndex < EndIndex) {
-            EndIndex = CheckIndex;
-            break;
-          }
-        }
-      }
-
-      var SearchIndex = Index;
-      var SearchEndIndex = EndIndex;
-
-      if (HighlightChars[Search].IncludeKeys != null && HighlightChars[Search].IncludeKeys == false) {
-        SearchIndex += Search.length;
-        EndIndex += HighlightChars[Search].EndChar.length;
-      }
-
-      var TextAdd = StandardText.substring(SearchIndex, SearchEndIndex); // Get just the highlighted string
-
-      if (HighlightChars[Search].MustInclude == null || TextAdd.includes(HighlightChars[Search].MustInclude) == true) {
-        // Add the string before the search:
-        NewHTML += StandardText.substring(0, Index);
-
-        var StyleType = HighlightChars[Search].Type;
-        var SetStyle = HighlightChars[Search].Style;
-
-        var TagSet = HighlightChars[Search].Tag || "span";
-
-        var AddHTMLStart = '<' + TagSet + ' ';
-        var AddHTMLEnd = "</" + TagSet + ">";
-        
-        var AnyExtra = "";
-        
-        if (StyleType == "Mention" ) {
-
-          var StartSnip = TextAdd.indexOf("&#60;")+5;
-          var UserCutID = TextAdd.substring(StartSnip, TextAdd.indexOf("&#62;", StartSnip+23));
-          var RealUsernameText = TextAdd.substring(0, TextAdd.indexOf("&#60;"));
-
-          if (UserCutID.length == 24 && RealUsernameText.length > 0) {
-            TextAdd = RealUsernameText;
-            AddHTMLStart += 'loaduserid="' + UserCutID + '" ';
-          } else {
-            StyleType = null;
-            SetStyle = "";
-          }
-          /*
-          AddHTMLStart += 'title="You Where Mentioned!" ';
-          AnyExtra += " background-color: #A41F2A";
-          */
-        }
-
-        // Add the new InnerHTML:
-        AddHTMLStart += 'style="' + SetStyle + AnyExtra + '"';
-        
-        if (StyleType == "Quote") {
-          DataPostEmbedLoad.push(["Post", TextAdd.substring(6), ID, PostContent]);
-        }
-        if (StyleType == "ChatLoad") {
-          DataPostEmbedLoad.push(["Chat", TextAdd.substring(6), ID, PostContent]);
-        }
-
-        if (StyleType != null && (HighlightChars[Search].IncludeKeys == null || HighlightChars[Search].IncludeKeys == true)) {
-          if (StyleType == "Link") {
-            AddHTMLStart += ' onMouseOver="this.style.textDecoration = ' + "'underline'" + '" onMouseOut="this.style.textDecoration = ' + "'none'" + '"';
-            if (TextAdd.substring(0, 4) != "http") {
-              TextAdd = "https://" + TextAdd;
-            }
-            if (TextAdd.includes("https://www.youtube.com/") == true || TextAdd.includes("https://youtu.be/") == true) {
-              if (UserDisplaySettings["Embed YouTube Videos"] == true) {
-                EmbedLink = TextAdd;
-              }
-            }
-            if (TextAdd.includes("https://www.twitch.tv/") == true) {
-              if (UserDisplaySettings["Embed Twitch Streams"] == true || UserDisplaySettings["Embed Twitch Live Chat"] == true) {
-                EmbedLink = TextAdd;
-              }
-            }
-            if (TextAdd.includes("https://studio.code.org/projects/") == true) {
-              if (UserDisplaySettings["Embed code.org Projects"] == true) {
-                EmbedLink = TextAdd;
-              }
-            }
-            if (TextAdd.includes("https://scratch.mit.edu/projects/") == true) {
-              if (UserDisplaySettings["Embed Scratch Games"] == true) {
-                EmbedLink = TextAdd;
-              }
-            }
-            if (TextAdd.substring(TextAdd.length-4) == ".gif" || TextAdd.substring(TextAdd.length-4) == ".mp4") {
-              if (UserDisplaySettings["Embed GIFs"] == true) {
-                EmbedLink = TextAdd;
-              }
-            }
-            if (EmbedLink == null) {
-              PreviewEmbedLink = TextAdd;
-            }
-          } else { // || TextAdd != ("@" + Username).trim()) {
-            AddHTMLStart += ' onMouseOver="this.style.backgroundColor = ' + "adjust(this.style.color, 75)" + '" onMouseOut="this.style.backgroundColor = ' + "'rgba(255, 255, 255, 0)'" + '"';
-          }
-
-          AddHTMLStart += ' typerender="' + StyleType + '"';
-        }
-        AddHTMLStart += ' textspan="">';
-
-        NewHTML += AddHTMLStart + TextAdd + AddHTMLEnd;
-        
-        StandardText = StandardText.substring(EndIndex);
-      } else {
-        if (TextAdd.includes(HighlightChars[Search].MustInclude) == false) {
-          NewHTML += StandardText.substring(0, EndIndex);
-          StandardText = StandardText.substring(EndIndex);
-        }
-      }
-    }
+  var TextRender = BuildPostTextHTML(Data.Text);
+  var NewHTML = TextRender.HTML;
+  var EmbedLink = TextRender.EmbedLink;
+  var PreviewEmbedLink = TextRender.PreviewEmbedLink;
+  for (var TextEmbed = 0; TextEmbed < TextRender.Embeds.length; TextEmbed++) {
+    DataPostEmbedLoad.push([TextRender.Embeds[TextEmbed][0], TextRender.Embeds[TextEmbed][1], ID, PostContent]);
   }
-  NewHTML += StandardText;
 
-  //NewHTML = NewHTML.replaceAll("    ", "<br/><br/>");
-  //NewHTML = NewHTML.replaceAll("  ", "<br/>");
-  NewHTML = NewHTML.replace(/\$\[NEWLINE\]\;/g, "<br/>").replace(/\$\[NEWLINE\]/g, "<br/>");
-
-  /*
-  var brFound = findAllIndexes(NewHTML, "<br/><br/>");
-  if (brFound.length > 0 && NewHTML.substring(brFound[brFound.length-1]-5, brFound[brFound.length-1]) != "<br/>") {
-    NewHTML = NewHTML.substring(0, brFound[brFound.length-1]) + NewHTML.substring(brFound[brFound.length-1]+10);
-    NewHTML += "<br/>";
-  }
-  */
-
-  /*
-  var re = new RegExp(String.fromCharCode(160), "g");
-  NewHTML = NewHTML.replace(re, " ");
-  */
   PostText.innerHTML = NewHTML;
   PostText.innerHTML = PostText.innerHTML.replace(/\&nbsp\;/g, " ");
 
@@ -1173,6 +1256,45 @@ async function CreatePostView(ID, Data, UserData, Parent, IsLikingPost, IsLikeDa
 
   //ClickArea.onclick = ClickPostExpand;
   //PostText.onclick = ClickPostExpand;
+}
+
+// Re-render a post's text wherever it is mounted right now (feed, profile,
+// likes, or the mobile full-screen view) after the author edits it.
+function UpdateRenderedPostText(PostID, Text) {
+  var Holders = document.querySelectorAll('[id="' + PostID + 'TextHolder"]');
+  for (var h = 0; h < Holders.length; h++) {
+    var Render = BuildPostTextHTML(Text);
+    Holders[h].innerHTML = Render.HTML;
+    Holders[h].innerHTML = Holders[h].innerHTML.replace(/\&nbsp\;/g, " ");
+  }
+  if (LoadedPostData[PostID] != null) {
+    LoadedPostData[PostID].Text = Text;
+  }
+  MarkPostEdited(PostID);
+}
+
+// Adds the "(edited)" suffix to every visible copy of a post's timestamp,
+// keeping the pinned marker at the end when present.
+function MarkPostEdited(PostID) {
+  var Infos = document.querySelectorAll('[id="' + PostID + 'PostInfo"]');
+  for (var i = 0; i < Infos.length; i++) {
+    var Info = Infos[i];
+    if (Info.textContent.indexOf("(edited)") != -1) {
+      continue;
+    }
+    if (Info.textContent.indexOf(" (Pinned)") != -1) {
+      Info.textContent = Info.textContent.replace(" (Pinned)", " (edited) (Pinned)");
+    } else {
+      Info.textContent = Info.textContent + " (edited)";
+    }
+    var Title = Info.getAttribute("title");
+    if (Title != null && Title.indexOf("(edited)") == -1) {
+      Info.setAttribute("title", Title + " (edited)");
+    }
+  }
+  if (LoadedPostData[PostID] != null) {
+    LoadedPostData[PostID].EditedAt = LoadedPostData[PostID].EditedAt || Date.now();
+  }
 }
 
 function CreateEmbedFrame(URL, Width, Height, Sitename, ID, MediaHolder) {
@@ -1423,7 +1545,7 @@ find("body").addEventListener("mousedown", function(event) {
         }
         if (DropdownClickData != null) {
           if (DropdownClickData == "TwitchLiveChatPopUp") {
-            ShowPopUp("Twitch Chat", "This is a chat from <a style='color: #6441a5' href='https://www.twitch.tv/p/en/about/' target='_blank'>Twitch.tv</a>, and is only viewable. Chatting on this post only appears here on <b>Photop</b>!", [ ["Okay", "#618BFF", null] ]);
+            ShowPopUp("Twitch Chat", "This is a chat from <a style='color: #6441a5' href='https://www.twitch.tv/p/en/about/' target='_blank'>Twitch.tv</a>, and is only viewable. Chatting on this post only appears here on <b>Memblu</b>!", [ ["Okay", "#618BFF", null] ]);
           } else {
             CreateDropdown(Path[i], JSON.parse(DropdownClickData), -6, "Left");
           }
@@ -1486,6 +1608,202 @@ find("body").addEventListener("mousedown", function(event) {
   // ChatContainer.scrollTop = ChatContainer.scrollHeight;
 });
 
+function EditPost(Data) {
+  Data = Data[3];
+  if (Data == null || UserID == null || Data.UserID != UserID || find("EditPostOverlay") != null) {
+    return;
+  }
+  var PostID = Data._id;
+  var HasMedia = Data.Media != null && Number(Data.Media.ImageCount) > 0;
+
+  var Overlay = createElement("EditPostOverlay", "div", "body", [
+      ["position", "fixed"],
+      ["display", "flex"],
+      ["align-items", "center"],
+      ["justify-content", "center"],
+      ["left", "0px"],
+      ["top", "0px"],
+      ["width", "100%"],
+      ["height", "100%"],
+      ["padding", "8px"],
+      ["box-sizing", "border-box"],
+      ["z-index", "3500"],
+      ["background-color", "rgba(0, 0, 0, 0.6)"]
+  ]);
+  var Frame = createElement("EditPostFrame", "div", Overlay, [
+      ["position", "relative"],
+      ["width", "100%"],
+      ["max-width", "520px"],
+      ["box-sizing", "border-box"],
+      ["padding", "14px"],
+      ["background-color", ContentColor],
+      ["border", "4px solid " + BorderColor],
+      ["border-radius", "12px"]
+  ]);
+
+  createElement("EditPostTitle", "div", Frame, [
+      ["position", "relative"],
+      ["margin-bottom", "10px"],
+
+      // Text:
+      ["font-size", "20px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "900"],
+      ["color", FontColorA],
+      ["text-align", "left"]
+  ]).textContent = "Edit Post";
+
+  var TextBox = createElement("EditPostText", "textarea", Frame, [
+      ["position", "relative"],
+      ["display", "block"],
+      ["box-sizing", "border-box"],
+      ["width", "100%"],
+      ["min-height", "140px"],
+      ["max-height", "45vh"],
+      ["padding", "8px"],
+      ["border-width", "0px"],
+      ["border-radius", "8px"],
+      ["background-color", ContentColorLayer3],
+      ["resize", "vertical"],
+      ["outline", "none"],
+
+      // Text:
+      ["font-size", "16px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "400"],
+      ["color", FontColorA],
+      ["text-align", "left"]
+  ]);
+  TextBox.value = Data.Text || "";
+  TextBox.setAttribute("maxlength", MaxPostCharAmount + 50);
+
+  var Footer = createElement("EditPostFooter", "div", Frame, [
+      ["position", "relative"],
+      ["display", "flex"],
+      ["align-items", "center"],
+      ["justify-content", "space-between"],
+      ["margin-top", "8px"]
+  ]);
+  var Counter = createElement("EditPostCounter", "div", Footer, [
+      ["position", "relative"],
+
+      // Text:
+      ["font-size", "13px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "900"],
+      ["color", "#999999"]
+  ]);
+  var ErrorBox = createElement("EditPostError", "div", Frame, [
+      ["position", "relative"],
+      ["display", "none"],
+      ["margin-top", "8px"],
+
+      // Text:
+      ["font-size", "13px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "900"],
+      ["color", "#FF5C5C"],
+      ["text-align", "left"]
+  ]);
+
+  var Buttons = createElement("EditPostButtons", "div", Footer, [
+      ["position", "relative"],
+      ["display", "flex"],
+      ["align-items", "center"]
+  ]);
+  var CancelButton = createElement("EditPostCancel", "div", Buttons, [
+      ["position", "relative"],
+      ["padding", "7px 12px"],
+      ["margin-right", "8px"],
+      ["background-color", "#475059"],
+      ["border-radius", "8px"],
+      ["cursor", "pointer"],
+
+      // Text:
+      ["font-size", "14px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "900"],
+      ["color", "#ffffff"]
+  ]);
+  CancelButton.textContent = "Cancel";
+  var SaveButton = createElement("EditPostSave", "div", Buttons, [
+      ["position", "relative"],
+      ["padding", "7px 12px"],
+      ["background-color", ThemeColor],
+      ["border-radius", "8px"],
+      ["cursor", "pointer"],
+
+      // Text:
+      ["font-size", "14px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "900"],
+      ["color", "#ffffff"]
+  ]);
+  SaveButton.textContent = "Save";
+
+  function UpdateCounter() {
+    var Length = TextBox.value.length;
+    Counter.textContent = Length + " / " + MaxPostCharAmount;
+    setCSS(Counter, "color", Length > MaxPostCharAmount ? "#FF5C5C" : "#999999");
+  }
+  UpdateCounter();
+
+  function CloseEditor() {
+    Overlay.remove();
+  }
+  CancelButton.addEventListener("click", CloseEditor);
+  Overlay.addEventListener("click", function(event) {
+    if (event.target == Overlay) {
+      CloseEditor();
+    }
+  });
+
+  var Saving = false;
+  function ShowError(Message) {
+    ErrorBox.textContent = Message;
+    ErrorBox.style.display = "block";
+  }
+
+  TextBox.addEventListener("input", function() {
+    ErrorBox.style.display = "none";
+    UpdateCounter();
+  });
+
+  SaveButton.addEventListener("click", function() {
+    if (Saving == true) {
+      return;
+    }
+    var Value = TextBox.value.replace(/\r\n/g, "\n");
+    if (Value.trim() == "" && HasMedia == false) {
+      ShowError("A text-only post cannot be empty.");
+      return;
+    }
+    if (Value.length > MaxPostCharAmount) {
+      ShowError("Posts can be up to " + MaxPostCharAmount + " characters long.");
+      return;
+    }
+
+    Saving = true;
+    SaveButton.textContent = "Saving...";
+    setCSS(SaveButton, "opacity", "0.7");
+    SendRequest("UpdatePost", { Task: "Edit", PostID: PostID, Text: Value }, function(Metadata, Result) {
+      if (Result.Code == 200) {
+        Data.Text = Value;
+        UpdateRenderedPostText(PostID, Value);
+        CloseEditor();
+        return;
+      }
+      Saving = false;
+      SaveButton.textContent = "Save";
+      setCSS(SaveButton, "opacity", "1");
+      ShowError(Result.Message || "Could not save the edit. Please try again.");
+    });
+  });
+
+  TextBox.focus();
+  TextBox.setSelectionRange(TextBox.value.length, TextBox.value.length);
+}
+
 function ShowPostDropdown(ExtraButton, ID, Data, PostContainer) {
   var TextCopyPaste = Data.Text.replace(/\$\[NEWLINE\]/g, "\n");
   TextCopyPaste = TextCopyPaste.replace(/\&\#63\;/g, "?");
@@ -1519,6 +1837,9 @@ function ShowPostDropdown(ExtraButton, ID, Data, PostContainer) {
     } else {
       DropdownPostButtons.unshift(["Unpin from Profile", ThemeColor, "PostActions", ["UnpinFromProfile", ID, Data, PostContainer]]);
     }
+  }
+  if (Data.UserID == UserID) {
+    DropdownPostButtons.unshift(["Edit Post", ThemeColor, "EditPost", Data]);
   }
   if (Data.UserID == UserID || CheckPermision(LoginUserRole, "CanDeletePosts") == true) {
     DropdownPostButtons.unshift(["Delete", "#FF5C5C", "PostActions", ["Delete", ID, Data, PostContainer]]);

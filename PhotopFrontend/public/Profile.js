@@ -97,6 +97,16 @@ async function LoadProfile(ProfileUserID, IgnoreAlreadyOn) {
 
     ProfileUserData = Data.UserInfo;
 
+    // Custom URLs are display-only: the rest of the client keeps using the
+    // account ID so follow/block/moderation calls stay unambiguous.
+    ProfileUserID = ProfileUserData._id;
+    ViewingProfileID = ProfileUserID;
+    if (ProfileUserData.CustomURL) {
+      var CustomURLParam = new URL(window.location);
+      CustomURLParam.searchParams.set("user", ProfileUserData.CustomURL);
+      window.history.replaceState({}, "", CustomURLParam);
+    }
+
     if (ProfileUserData.ProfileData == null) {
       ProfileUserData.ProfileData = {};
     }

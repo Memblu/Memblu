@@ -71,6 +71,7 @@ export function handleSignUpAccount(body: any, clientIp: string): any {
     Code: 200,
     RealUser: cleanUser,
     UserID: userId,
+    CustomURL: null,
     Email: Email.toLowerCase(),
     Settings: defaultSettings,
     ProfileData: defaultProfileData,
@@ -117,6 +118,7 @@ export function handleSignInAccount(body: any, clientIp: string): any {
     Code: 200,
     RealUser: user.user,
     UserID: user.id,
+    CustomURL: user.custom_url || null,
     Email: user.email,
     Settings: settings,
     ProfileData: profileData,
@@ -156,6 +158,7 @@ export function handleGetAccountData(user: UserRecord | null): any {
     UserData: {
       _id: user.id,
       User: user.user,
+      CustomURL: user.custom_url || null,
       Email: user.email,
       Role: user.role,
       Settings: JSON.parse(user.settings || "{}"),

@@ -84,7 +84,7 @@ Verifies all core subsystems:
 - Post creation & feed querying
 - Post liking & unliking
 - Per-post live chat rooms & realtime messaging
-- Profile viewing
+- Profile viewing, including optional custom profile URLs (`?user=your-name` instead of a user ID)
 - Multipart image uploads & static media serving
 - Admin panel: access control, overview stats, user browsing/roles, bans and appeals, content moderation, reports, sessions, broadcasts and the audit log
 
