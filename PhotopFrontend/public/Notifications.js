@@ -373,8 +373,8 @@ function RenderNotificationCard(Notification, List, Loader) {
     Img.style.width = "44px";
     Img.style.height = "44px";
     Img.style.objectFit = "cover";
-    Avatar.appendChild(Img);
     Avatar.textContent = "";
+    Avatar.appendChild(Img);
   } else {
     Avatar.textContent = Info.Icon.charAt(0);
   }
