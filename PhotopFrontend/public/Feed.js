@@ -1154,9 +1154,22 @@ function RenderNewText() {
   }
   */
 
-  var Anchor = window.getSelection().anchorNode.parentNode || CreatePostTextHolder;
-  if (Anchor.nodeName != "DIV") {
-    Anchor = find(Anchor.getAttribute("TextTypeHolder"));
+  // Only trust the selection while it is inside the composer. Callers such as
+  // the chat dropdown can invoke this before focus moves into the composer, in
+  // which case anchorNode is null or belongs to another element.
+  var Selection = window.getSelection();
+  var AnchorNode = Selection != null && Selection.rangeCount > 0 ? Selection.anchorNode : null;
+  var Anchor = CreatePostTextHolder;
+  if (AnchorNode != null && (AnchorNode === CreatePostTextHolder || CreatePostTextHolder.contains(AnchorNode))) {
+    Anchor = AnchorNode === CreatePostTextHolder ? CreatePostTextHolder : AnchorNode.parentNode;
+    if (Anchor.nodeName != "DIV") {
+      var AnchorHolder = find(Anchor.getAttribute("TextTypeHolder"));
+      if (AnchorHolder != null) {
+        Anchor = AnchorHolder;
+      } else {
+        Anchor = CreatePostTextHolder;
+      }
+    }
   }
   var CaretPos = getCaretIndex(Anchor);
   

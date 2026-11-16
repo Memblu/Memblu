@@ -1,9 +1,102 @@
 import { WebSocket } from "ws";
 import http from "node:http";
 import assert from "node:assert";
+import fs from "node:fs";
+import path from "node:path";
+import { db } from "./db.js";
 
 const BASE_URL = "http://127.0.0.1:3000";
 const WS_URL = "ws://127.0.0.1:3000/Server1";
+
+// Track everything the suite creates so it can remove its own test data.
+const createdUserIDs: string[] = [];
+const createdMediaFiles: string[] = [];
+
+function cleanupTestData(): void {
+  const ids = Array.from(new Set(createdUserIDs.filter(Boolean)));
+  const removed: Record<string, number> = {};
+  const marks = (list: string[]) => list.map(() => "?").join(",");
+
+  if (ids.length > 0) {
+    const ph = marks(ids);
+    db.exec("BEGIN");
+    try {
+      const postIDs = db.prepare(`SELECT id FROM posts WHERE user_id IN (${ph})`)
+        .all(...ids).map((row: any) => String(row.id));
+      const chatSQL = `SELECT id FROM chats WHERE user_id IN (${ph})` +
+        (postIDs.length > 0 ? ` OR post_id IN (${marks(postIDs)})` : "");
+      const chatIDs = db.prepare(chatSQL)
+        .all(...ids, ...postIDs).map((row: any) => String(row.id));
+
+      const run = (table: string, sql: string, params: any[]) => {
+        removed[table] = Number(db.prepare(sql).run(...params).changes || 0);
+      };
+
+      if (chatIDs.length > 0) {
+        run("chat_likes", `DELETE FROM chat_likes WHERE user_id IN (${ph}) OR chat_id IN (${marks(chatIDs)})`, [...ids, ...chatIDs]);
+      } else {
+        run("chat_likes", `DELETE FROM chat_likes WHERE user_id IN (${ph})`, ids);
+      }
+
+      if (postIDs.length > 0) {
+        run("likes", `DELETE FROM likes WHERE user_id IN (${ph}) OR post_id IN (${marks(postIDs)})`, [...ids, ...postIDs]);
+      } else {
+        run("likes", `DELETE FROM likes WHERE user_id IN (${ph})`, ids);
+      }
+
+      if (chatIDs.length > 0) {
+        run("chats", `DELETE FROM chats WHERE id IN (${marks(chatIDs)})`, chatIDs);
+      }
+      if (postIDs.length > 0) {
+        run("posts", `DELETE FROM posts WHERE id IN (${marks(postIDs)})`, postIDs);
+      }
+
+      run("follows", `DELETE FROM follows WHERE follower_id IN (${ph}) OR target_id IN (${ph})`, [...ids, ...ids]);
+      run("sessions", `DELETE FROM sessions WHERE user_id IN (${ph})`, ids);
+      run("ban_appeals", `DELETE FROM ban_appeals WHERE user_id IN (${ph})`, ids);
+
+      const reportClauses = [`reporter_id IN (${ph})`];
+      const reportParams: any[] = [...ids];
+      if (postIDs.length > 0) {
+        reportClauses.push(`(content_type = 'Post' AND content_id IN (${marks(postIDs)}))`);
+        reportParams.push(...postIDs);
+      }
+      if (chatIDs.length > 0) {
+        reportClauses.push(`(content_type = 'Chat' AND content_id IN (${marks(chatIDs)}))`);
+        reportParams.push(...chatIDs);
+      }
+      reportClauses.push(`(content_type = 'User' AND content_id IN (${ph}))`);
+      reportParams.push(...ids);
+      run("reports", `DELETE FROM reports WHERE ${reportClauses.join(" OR ")}`, reportParams);
+
+      run("admin_log", `DELETE FROM admin_log WHERE actor_id IN (${ph})`, ids);
+      run("users", `DELETE FROM users WHERE id IN (${ph})`, ids);
+
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  for (const fileName of createdMediaFiles) {
+    try {
+      fs.rmSync(path.join(process.cwd(), "media", "PostImages", fileName), { force: true });
+    } catch {
+      // Media cleanup is best-effort; the database rows are what matter.
+    }
+  }
+
+  if (ids.length === 0) {
+    console.log("🧹 No test data to clean up.");
+    return;
+  }
+  const summary = Object.entries(removed)
+    .filter(([, count]) => count > 0)
+    .map(([table, count]) => `${table}: ${count}`)
+    .join(", ");
+  console.log(`🧹 Removed ${ids.length} test accounts${summary ? ` (${summary})` : ""}.`);
+}
 
 async function runTests() {
   console.log("Starting backend tests...");
@@ -18,6 +111,7 @@ async function runTests() {
 
   let reqId = 0;
   const awaiting = new Map<number, (body: any) => void>();
+  let broadcastHandler: ((body: any) => void) | null = null;
 
   ws.on("message", (raw) => {
     const data = JSON.parse(raw.toString());
@@ -27,8 +121,26 @@ async function runTests() {
         awaiting.get(id)!(data.Body);
         awaiting.delete(id);
       }
+    } else if (broadcastHandler != null) {
+      broadcastHandler(data.Body);
     }
   });
+
+  function waitForBroadcast(predicate: (body: any) => boolean): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        broadcastHandler = null;
+        reject(new Error("Timed out waiting for server broadcast"));
+      }, 2000);
+      broadcastHandler = (body) => {
+        if (predicate(body)) {
+          clearTimeout(timer);
+          broadcastHandler = null;
+          resolve(body);
+        }
+      };
+    });
+  }
 
   function sendReq(task: string, payload: any, token?: string, userId?: string): Promise<any> {
     const currentId = reqId++;
@@ -67,6 +179,7 @@ async function runTests() {
   assert.strictEqual(signUpRes.Settings.ProfilePic, "DefaultProfilePic", "New users should get the default profile image");
   const token = signUpRes.Token;
   const userId = signUpRes.UserID;
+  createdUserIDs.push(userId);
   console.log(`✔ SignUpAccount verified for ${testUser} (${userId})`);
 
   // 4. Test GetAccountData
@@ -117,7 +230,89 @@ async function runTests() {
   assert.strictEqual(getChatsRes.Code, 200, "GetChats should return 200");
   assert.ok(getChatsRes.Chats.length > 0, "Chats should be retrieved");
   assert.strictEqual(getChatsRes.Chats[0].Text, "Testing live chat on this post!");
-  console.log("✔ ConnectLiveChat & CreateChat verified");
+
+  // 8b. Test replying to a chat. The client renders replies using
+  // ReplyData.UserData.User, so the backend must include the parent author.
+  const parentChatID = getChatsRes.Chats[0]._id;
+  const replyChatRes = await sendReq("CreateChat", {
+    PostID: postId,
+    Text: "Replying to my own chat!",
+    ReplyID: parentChatID
+  }, token, userId);
+  assert.strictEqual(replyChatRes.Code, 200, "CreateChat reply should return 200");
+
+  const getRepliesRes = await sendReq("GetChats", { Post: postId, Amount: 15 }, token, userId);
+  const replyChat = getRepliesRes.Chats.find((c: any) => c.ReplyID === parentChatID);
+  assert.ok(replyChat, "Reply chat should reference the parent chat");
+  const parentReply = getRepliesRes.Replies.find((r: any) => r._id === parentChatID);
+  assert.ok(parentReply, "Reply payload should include the parent chat");
+  assert.strictEqual(parentReply.UserData.User, testUser, "Reply payload should include the parent author's UserData");
+  console.log("✔ Chat replies verified");
+
+  // 8c. Test chat likes (count, per-user IsLiked, and idempotency).
+  const likeChatRes = await sendReq("LikeChat", { ChatID: parentChatID }, token, userId);
+  assert.strictEqual(likeChatRes.Code, 200, "LikeChat should return 200");
+  assert.strictEqual(likeChatRes.Likes, 1, "Chat likes should increment to 1");
+  assert.strictEqual(likeChatRes.IsLiked, true, "LikeChat should report IsLiked");
+
+  const chatsAfterChatLike = await sendReq("GetChats", { Post: postId, Amount: 15 }, token, userId);
+  const likedChat = chatsAfterChatLike.Chats.find((c: any) => c._id === parentChatID);
+  assert.ok(likedChat, "Liked chat should still be returned");
+  assert.strictEqual(likedChat.Likes, 1, "Chat response should include the like count");
+  assert.strictEqual(likedChat.IsLiked, true, "Chat response should include the viewer's IsLiked state");
+
+  const likeChatAgainRes = await sendReq("LikeChat", { ChatID: parentChatID }, token, userId);
+  assert.strictEqual(likeChatAgainRes.Likes, 1, "Liking the same chat twice should not double-count");
+
+  const unlikeChatRes = await sendReq("UnlikeChat", { ChatID: parentChatID }, token, userId);
+  assert.strictEqual(unlikeChatRes.Code, 200, "UnlikeChat should return 200");
+  assert.strictEqual(unlikeChatRes.Likes, 0, "Chat likes should decrement to 0");
+  assert.strictEqual(unlikeChatRes.IsLiked, false, "UnlikeChat should report IsLiked false");
+
+  const chatsAfterChatUnlike = await sendReq("GetChats", { Post: postId, Amount: 15 }, token, userId);
+  const unlikedChat = chatsAfterChatUnlike.Chats.find((c: any) => c._id === parentChatID);
+  assert.strictEqual(unlikedChat.Likes, 0, "Chat response should reflect the removed like");
+  assert.strictEqual(unlikedChat.IsLiked, false, "Chat response should reflect the viewer's unliked state");
+  console.log("✔ Chat likes verified");
+
+  // 8d. Test post/chat embeds. Quoting with "/Post_<id>" or "/Chat_<id>" relies
+  // on LoadPlatformEmbeds returning the referenced content and its authors.
+  const embedRes = await sendReq("LoadPlatformEmbeds", {
+    Embeds: [
+      { AssetType: "Post", AssetID: postId },
+      { AssetType: "Chat", AssetID: parentChatID },
+      { AssetType: "Chat", AssetID: replyChat._id },
+      { AssetType: "Post", AssetID: "missingpost" }
+    ]
+  }, token, userId);
+  assert.strictEqual(embedRes.Code, 200, "LoadPlatformEmbeds should return 200");
+
+  const embeddedPost = embedRes.EmbedData["Post" + postId];
+  assert.ok(embeddedPost, "Post embed data should be returned");
+  assert.strictEqual(embeddedPost.Text, "Hello world! Photop is revived!");
+  assert.strictEqual(embeddedPost.UserID, userId);
+  assert.strictEqual(embedRes.UserData[userId].User, testUser, "Post embed should include author data");
+
+  const embeddedChat = embedRes.EmbedData["Chat" + parentChatID];
+  assert.ok(embeddedChat, "Chat embed data should be returned");
+  assert.strictEqual(embeddedChat.Text, "Testing live chat on this post!");
+  assert.strictEqual(embedRes.UserData[embeddedChat.UserID].User, testUser, "Chat embed should include author data");
+
+  const embeddedReply = embedRes.EmbedData["Chat" + replyChat._id];
+  assert.ok(embeddedReply, "Reply chat embed data should be returned");
+  assert.strictEqual(embeddedReply.ReplyID, parentChatID, "Reply embed should expose the parent chat");
+  assert.ok(embedRes.EmbedData["Chat" + parentChatID], "Reply embed should include the parent chat data");
+
+  assert.strictEqual(embedRes.EmbedData["Postmissingpost"], undefined, "Missing posts should not produce embed data");
+  console.log("✔ Post and chat embeds verified");
+
+  // 8e. Test deleting an own chat. Authors (including plain "User" accounts)
+  // must be able to remove their own messages, not just moderators.
+  const deleteChatRes = await sendReq("UpdateChat", { ChatID: replyChat._id, UpdateValues: [["Hidden", ""]] }, token, userId);
+  assert.strictEqual(deleteChatRes.Code, 200, "Authors should be able to delete their own chat");
+  const chatsAfterChatDelete = await sendReq("GetChats", { Post: postId, Amount: 15 }, token, userId);
+  assert.ok(!chatsAfterChatDelete.Chats.some((c: any) => c._id === replyChat._id), "Deleted chat should no longer be returned");
+  console.log("✔ Chat deletion by author verified");
 
   // 9. Test GetProfile
   const profileRes = await sendReq("GetProfile", { ProfileUserID: userId }, token, userId);
@@ -169,6 +364,7 @@ async function runTests() {
 
   assert.strictEqual(uploadRes.status, 200, "ImageUpload HTTP status should be 200");
   assert.strictEqual(uploadRes.data.success, true, "ImageUpload response should indicate success");
+  createdMediaFiles.push(`${postId}0`);
   console.log("✔ HTTP ImageUpload endpoint verified");
 
   // 11. Test Static Media File Serving
@@ -197,14 +393,333 @@ async function runTests() {
   assert.ok(String(defaultPicRes.contentType).startsWith("image/"), "Default profile image should be served with an image content type");
   console.log("✔ Default profile image serving verified");
 
+  // 13. Test real-time post deletion. Deleting a post must broadcast a
+  // NewPostDeleted packet so connected clients can remove the post in place,
+  // and subsequent lookups must no longer return it.
+  const deleteBroadcast = waitForBroadcast(
+    (body) => body.ClientFunction === "NewPostDeleted" && Array.isArray(body.PostIDs) && body.PostIDs.includes(postId)
+  );
+  const deletePostRes = await sendReq("UpdatePost", { Task: "Delete", PostID: postId }, token, userId);
+  assert.strictEqual(deletePostRes.Code, 200, "Authors should be able to delete their own post");
+  const deletePacket = await deleteBroadcast;
+  assert.deepStrictEqual(deletePacket.PostIDs, [postId], "Delete broadcast should identify the removed post");
+  const postAfterDelete = await sendReq("GetPosts", { LookupID: postId }, token, userId);
+  assert.strictEqual(postAfterDelete.Posts.length, 0, "Deleted post should no longer be returned");
+  console.log("✔ Real-time post deletion broadcast verified");
+
+  // 14. Test admin panel access control. Only staff (Owner/Moderator) may use
+  // the panel, and management actions are Owner-only.
+  async function signUpUser(prefix: string) {
+    const name = prefix + "_" + Math.floor(Math.random() * 10000);
+    const res = await sendReq("SignUpAccount", {
+      Username: name,
+      Email: `${name}@example.com`,
+      Password: "Password123!"
+    });
+    assert.strictEqual(res.Code, 200, `${prefix} signup should succeed`);
+    createdUserIDs.push(res.UserID as string);
+    return { name, token: res.Token as string, id: res.UserID as string };
+  }
+
+  const owner = await signUpUser("aown");
+  db.prepare("UPDATE users SET role = 'Owner' WHERE id = ?").run(owner.id);
+  const moderator = await signUpUser("amod");
+  db.prepare("UPDATE users SET role = 'Moderator' WHERE id = ?").run(moderator.id);
+  const target = await signUpUser("atgt");
+
+  const plainDenied = await sendReq("AdminOverview", {}, token, userId);
+  assert.strictEqual(plainDenied.Code, 403, "Plain users must not access the admin panel");
+  const anonymousDenied = await sendReq("AdminOverview", {});
+  assert.strictEqual(anonymousDenied.Code, 401, "Anonymous requests must not access the admin panel");
+  console.log("✔ Admin access control verified");
+
+  // 15. Test the overview payload (stats, 7 day activity, system info).
+  const overviewRes = await sendReq("AdminOverview", {}, owner.token, owner.id);
+  assert.strictEqual(overviewRes.Code, 200, "AdminOverview should return 200");
+  assert.ok(overviewRes.Stats.Users >= 4, "Overview should count users");
+  assert.strictEqual(overviewRes.Activity.length, 7, "Overview should return a 7 day activity series");
+  assert.ok(overviewRes.Activity[0].Date && "Posts" in overviewRes.Activity[0], "Activity entries should be dated");
+  assert.ok(overviewRes.System.Node, "Overview should include system info");
+  assert.ok(overviewRes.ConnectedClients >= 1, "Overview should report connected clients");
+  console.log("✔ AdminOverview verified");
+
+  // 16. Test the user browser (pagination, search, filters) and user detail.
+  const usersRes = await sendReq("AdminUsers", { Page: 1, Limit: 5 }, owner.token, owner.id);
+  assert.strictEqual(usersRes.Code, 200, "AdminUsers should return 200");
+  assert.ok(usersRes.Users.length > 0, "AdminUsers should return users");
+  assert.ok(usersRes.Users.length <= 5, "AdminUsers should honour the page limit");
+  assert.ok(usersRes.Total >= 4, "AdminUsers should report the total user count");
+
+  const searchUsersRes = await sendReq("AdminUsers", { Search: target.name }, owner.token, owner.id);
+  assert.strictEqual(searchUsersRes.Total, 1, "User search should find exactly the target user");
+  assert.strictEqual(searchUsersRes.Users[0]._id, target.id);
+
+  const staffRes = await sendReq("AdminUsers", { Filter: "Staff", Limit: 100 }, owner.token, owner.id);
+  assert.ok(staffRes.Users.every((u: any) => u.Role === "Owner" || u.Role === "Moderator"), "Staff filter should only return staff");
+  assert.ok(staffRes.Users.some((u: any) => u._id === owner.id), "Staff filter should include the owner");
+
+  const detailRes = await sendReq("AdminUserDetail", { UserID: target.id }, owner.token, owner.id);
+  assert.strictEqual(detailRes.Code, 200, "AdminUserDetail should return 200");
+  assert.strictEqual(detailRes.User._id, target.id);
+  assert.strictEqual(detailRes.User.Email, `${target.name}@example.com`);
+  assert.ok(detailRes.Stats, "AdminUserDetail should include per-user stats");
+  console.log("✔ Admin user browsing verified");
+
+  // 17. Test role management (Owner-only).
+  const moderatorRoleChange = await sendReq("AdminUpdateUser", {
+    Task: "Role", UserID: target.id, Role: "Tester"
+  }, moderator.token, moderator.id);
+  assert.strictEqual(moderatorRoleChange.Code, 403, "Moderators must not be able to change roles");
+
+  const roleChangeRes = await sendReq("AdminUpdateUser", {
+    Task: "Role", UserID: target.id, Role: "Tester"
+  }, owner.token, owner.id);
+  assert.strictEqual(roleChangeRes.Code, 200, "Owners should be able to change roles");
+  assert.strictEqual(roleChangeRes.Role, "Tester");
+  const promotedDetail = await sendReq("AdminUserDetail", { UserID: target.id }, owner.token, owner.id);
+  assert.strictEqual(promotedDetail.User.Role, "Tester", "Role change should persist");
+
+  const invalidRoleRes = await sendReq("AdminUpdateUser", {
+    Task: "Role", UserID: target.id, Role: "SuperAdmin"
+  }, owner.token, owner.id);
+  assert.strictEqual(invalidRoleRes.Code, 400, "Unknown roles must be rejected");
+
+  await sendReq("AdminUpdateUser", { Task: "Role", UserID: target.id, Role: "User" }, owner.token, owner.id);
+  console.log("✔ Admin role management verified");
+
+  // 18. Test banning and unbanning, including the real-time ban packet.
+  // Ban packets are only delivered to sockets signed in as the target, so open
+  // a dedicated connection for that user instead of reusing the admin socket.
+  const targetSocket = new WebSocket(WS_URL);
+  await new Promise<void>((resolve, reject) => {
+    targetSocket.on("open", () => resolve());
+    targetSocket.on("error", (err) => reject(err));
+  });
+  const banBroadcast = new Promise<any>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timed out waiting for the ban packet")), 3000);
+    targetSocket.on("message", (raw) => {
+      const data = JSON.parse(raw.toString());
+      if (data.Metadata?.ReqSource === "Server" && data.Body?.ClientFunction === "UserBanDisplay") {
+        clearTimeout(timer);
+        resolve(data.Body);
+      }
+    });
+  });
+  targetSocket.send(JSON.stringify({
+    Metadata: { ReqID: 999001, ReqTask: "GetAccountData", AuthToken: target.token, UserID: target.id },
+    Body: {}
+  }));
+  await new Promise((resolve) => setTimeout(resolve, 250));
+
+  const banRes = await sendReq("AdminUpdateUser", {
+    Task: "Ban", UserID: target.id, Reason: "Admin panel test ban", BanLength: 3600
+  }, owner.token, owner.id);
+  assert.strictEqual(banRes.Code, 200, "Owners should be able to ban users");
+  assert.strictEqual(banRes.BanTarget.UserID, target.id);
+  assert.strictEqual(banRes.BanTarget.BanData.BanReason, "Admin panel test ban");
+  assert.strictEqual(banRes.RevokeSessionsFor, target.id, "Banning should revoke the target's sessions");
+  const banPacket = await banBroadcast;
+  assert.strictEqual(banPacket.Account, target.name, "Ban broadcast should identify the target");
+  targetSocket.close();
+
+  const bannedDetail = await sendReq("AdminUserDetail", { UserID: target.id }, owner.token, owner.id);
+  assert.strictEqual(bannedDetail.User.Status, "banned", "User should be marked as banned");
+
+  // Banned users must still be able to sign in so they can see the ban notice
+  // and submit an appeal.
+  const bannedSignIn = await sendReq("SignInAccount", {
+    Username: target.name, Password: "Password123!"
+  });
+  assert.strictEqual(bannedSignIn.Code, 200, "Banned users should be able to sign in");
+  assert.ok(bannedSignIn.BanData, "Sign-in should return the ban notice data");
+  assert.strictEqual(bannedSignIn.BanData.BanReason, "Admin panel test ban");
+  const bannedAccountData = await sendReq("GetAccountData", {}, target.token, target.id);
+  assert.ok(bannedAccountData.BanData, "Reloading a banned account should still return the ban notice");
+
+  const moderatorUnban = await sendReq("AdminUpdateUser", {
+    Task: "Unban", UserID: target.id
+  }, moderator.token, moderator.id);
+  assert.strictEqual(moderatorUnban.Code, 403, "Moderators must not be able to unban users");
+
+  const unbanRes = await sendReq("AdminUpdateUser", {
+    Task: "Unban", UserID: target.id
+  }, owner.token, owner.id);
+  assert.strictEqual(unbanRes.Code, 200, "Owners should be able to unban users");
+  const unbannedDetail = await sendReq("AdminUserDetail", { UserID: target.id }, owner.token, owner.id);
+  assert.strictEqual(unbannedDetail.User.Status, "active", "User should be active after unban");
+  console.log("✔ Admin ban and unban verified");
+
+  // 19. Test content moderation: delete and restore a post.
+  const targetPost = await sendReq("CreatePost", {
+    Text: "Admin panel moderation test post",
+    Media: {},
+    Configuration: []
+  }, target.token, target.id);
+  assert.strictEqual(targetPost.Code, 200);
+  const moderatedPostID = targetPost.NewPostID as string;
+
+  const contentList = await sendReq("AdminContent", { Type: "Posts", Search: "Admin panel moderation test post" }, owner.token, owner.id);
+  assert.strictEqual(contentList.Code, 200, "AdminContent should return 200");
+  const listedPost = contentList.Items.find((item: any) => item._id === moderatedPostID);
+  assert.ok(listedPost, "AdminContent should find the target post");
+  assert.strictEqual(listedPost.Author, target.name, "Content rows should expose the author");
+
+  const contentDeleteBroadcast = waitForBroadcast(
+    (body) => body.ClientFunction === "NewPostDeleted" && Array.isArray(body.PostIDs) && body.PostIDs.includes(moderatedPostID)
+  );
+  const contentDeleteRes = await sendReq("AdminContentAction", {
+    Task: "Delete", Type: "Post", ID: moderatedPostID
+  }, owner.token, owner.id);
+  assert.strictEqual(contentDeleteRes.Code, 200, "Admins should be able to delete content");
+  assert.deepStrictEqual(contentDeleteRes.DeletedPostIDs, [moderatedPostID]);
+  await contentDeleteBroadcast;
+
+  const hiddenPostLookup = await sendReq("GetPosts", { LookupID: moderatedPostID }, owner.token, owner.id);
+  assert.strictEqual(hiddenPostLookup.Posts.length, 0, "Deleted content should disappear from lookups");
+  const deletedContent = await sendReq("AdminContent", { Type: "Posts", Search: moderatedPostID, Filter: "Deleted" }, owner.token, owner.id);
+  assert.ok(deletedContent.Items.some((item: any) => item._id === moderatedPostID && item.Removed === true), "Deleted content should be listed as removed");
+
+  const restoreRes = await sendReq("AdminContentAction", {
+    Task: "Restore", Type: "Post", ID: moderatedPostID
+  }, owner.token, owner.id);
+  assert.strictEqual(restoreRes.Code, 200, "Admins should be able to restore content");
+  const restoredPostLookup = await sendReq("GetPosts", { LookupID: moderatedPostID }, owner.token, owner.id);
+  assert.strictEqual(restoredPostLookup.Posts.length, 1, "Restored content should be visible again");
+  console.log("✔ Admin content moderation verified");
+
+  // 20. Test the report queue and resolving a report.
+  const reportRes = await sendReq("PostWebhook", {
+    Webhook: "Report",
+    Details: { Type: "Post", ReportContentID: moderatedPostID, Reason: "Spam" }
+  }, token, userId);
+  assert.strictEqual(reportRes.Code, 200, "Reporting content should succeed");
+
+  const openReports = await sendReq("AdminReports", { Task: "List", Status: "open", Type: "Post" }, owner.token, owner.id);
+  assert.strictEqual(openReports.Code, 200, "AdminReports should return 200");
+  const targetReport = openReports.Reports.find((report: any) => report.ContentID === moderatedPostID);
+  assert.ok(targetReport, "The new report should be queued");
+  assert.strictEqual(targetReport.Reason, "Spam");
+  assert.strictEqual(targetReport.Reporter, testUser, "Reports should include the reporter's username");
+
+  const reportUpdateRes = await sendReq("AdminReports", {
+    Task: "Update", ReportID: targetReport._id, Status: "dismissed", Note: "No action needed"
+  }, moderator.token, moderator.id);
+  assert.strictEqual(reportUpdateRes.Code, 200, "Moderators should be able to resolve reports");
+
+  const dismissedReports = await sendReq("AdminReports", { Task: "List", Status: "dismissed", Type: "Post" }, owner.token, owner.id);
+  assert.ok(dismissedReports.Reports.some((report: any) => report._id === targetReport._id), "Dismissed reports should move out of the open queue");
+
+  const reportDeleteRes = await sendReq("AdminReports", {
+    Task: "DeleteContent", ReportID: targetReport._id
+  }, moderator.token, moderator.id);
+  assert.strictEqual(reportDeleteRes.Code, 200, "Report actions should be able to remove content");
+  assert.deepStrictEqual(reportDeleteRes.DeletedPostIDs, [moderatedPostID], "Removing a reported post should report the deletion");
+  assert.strictEqual(reportDeleteRes.Status, "resolved");
+  console.log("✔ Admin reports verified");
+
+  // 21. Test ban appeals (listing, dismissing and reopening).
+  await sendReq("AdminUpdateUser", {
+    Task: "Ban", UserID: target.id, Reason: "Appeal test ban"
+  }, owner.token, owner.id);
+  const appealSendRes = await sendReq("SendBanAppeal", { Appeal: "Please review this ban." }, target.token, target.id);
+  assert.strictEqual(appealSendRes.Code, 200, "Banned users should be able to appeal");
+
+  const pendingAppeals = await sendReq("AdminAppeals", { Task: "List", Status: "pending" }, moderator.token, moderator.id);
+  assert.strictEqual(pendingAppeals.Code, 200, "AdminAppeals should return 200");
+  const targetAppeal = pendingAppeals.Appeals.find((appeal: any) => appeal.UserID === target.id);
+  assert.ok(targetAppeal, "The new appeal should be queued");
+  assert.strictEqual(targetAppeal.User, target.name);
+
+  const dismissAppealRes = await sendReq("AdminAppeals", {
+    Task: "Resolve", AppealID: targetAppeal._id, Action: "Dismiss", Note: "Ban stands"
+  }, moderator.token, moderator.id);
+  assert.strictEqual(dismissAppealRes.Code, 200, "Moderators should be able to dismiss appeals");
+  assert.strictEqual(dismissAppealRes.Handled, true);
+
+  const handledAppeals = await sendReq("AdminAppeals", { Task: "List", Status: "handled" }, owner.token, owner.id);
+  assert.ok(handledAppeals.Appeals.some((appeal: any) => appeal._id === targetAppeal._id), "Handled appeals should leave the pending queue");
+
+  const reopenAppealRes = await sendReq("AdminAppeals", {
+    Task: "Resolve", AppealID: targetAppeal._id, Action: "Reopen"
+  }, owner.token, owner.id);
+  assert.strictEqual(reopenAppealRes.Code, 200, "Owners should be able to reopen appeals");
+  assert.strictEqual(reopenAppealRes.Handled, false);
+  await sendReq("AdminUpdateUser", { Task: "Unban", UserID: target.id }, owner.token, owner.id);
+  console.log("✔ Admin appeals verified");
+
+  // 22. Test session management.
+  const sessionsRes = await sendReq("AdminSessions", { Task: "List", Status: "Active" }, owner.token, owner.id);
+  assert.strictEqual(sessionsRes.Code, 200, "AdminSessions should return 200");
+  assert.ok(sessionsRes.Sessions.some((session: any) => session.UserID === target.id), "Active sessions should include the target user");
+
+  const revokeRes = await sendReq("AdminSessions", {
+    Task: "Revoke", UserID: target.id
+  }, owner.token, owner.id);
+  assert.strictEqual(revokeRes.Code, 200, "Admins should be able to revoke sessions");
+  assert.strictEqual(revokeRes.RevokeSessionsFor, target.id);
+  const revokedSessionCheck = await sendReq("GetAccountData", {}, target.token, target.id);
+  assert.strictEqual(revokedSessionCheck.Code, 401, "Revoked sessions must stop authenticating");
+
+  const cleanupRes = await sendReq("AdminSessions", { Task: "Cleanup" }, owner.token, owner.id);
+  assert.strictEqual(cleanupRes.Code, 200, "Session cleanup should return 200");
+  assert.ok(cleanupRes.Removed >= 0, "Session cleanup should report the removed count");
+  console.log("✔ Admin session management verified");
+
+  // 23. Test staff broadcasts. Connected clients should receive the packet.
+  const announcementBroadcast = waitForBroadcast(
+    (body) => body.ClientFunction === "AdminAnnouncement" && body.Message === "Admin panel test announcement"
+  );
+  const broadcastRes = await sendReq("AdminBroadcast", {
+    Mode: "Announcement", Message: "Admin panel test announcement", Level: "info"
+  }, owner.token, owner.id);
+  assert.strictEqual(broadcastRes.Code, 200, "AdminBroadcast should return 200");
+  assert.ok(broadcastRes.Delivered >= 1, "Broadcasts should report how many clients received them");
+  const announcementPacket = await announcementBroadcast;
+  assert.strictEqual(announcementPacket.Level, "info");
+
+  // "Reload" is the forced update path used when a new frontend build ships.
+  const reloadBroadcast = waitForBroadcast(
+    (body) => body.ClientFunction === "AdminForceRefresh" && body.Mode === "Reload"
+  );
+  const reloadRes = await sendReq("AdminBroadcast", {
+    Mode: "Reload", Message: "Photop has been updated. Reloading…", Level: "info"
+  }, owner.token, owner.id);
+  assert.strictEqual(reloadRes.Code, 200, "The forced update broadcast should return 200");
+  assert.ok(reloadRes.Delivered >= 1, "The forced update should reach connected clients");
+  const reloadPacket = await reloadBroadcast;
+  assert.strictEqual(reloadPacket.ClientFunction, "AdminForceRefresh");
+  assert.strictEqual(reloadPacket.Mode, "Reload");
+
+  const badBroadcastRes = await sendReq("AdminBroadcast", { Mode: "Bogus" }, owner.token, owner.id);
+  assert.strictEqual(badBroadcastRes.Code, 400, "Unknown broadcast modes must be rejected");
+  console.log("✔ Admin broadcasts verified");
+
+  // 24. Test the audit log records the actions taken above.
+  const logRes = await sendReq("AdminLog", {}, owner.token, owner.id);
+  assert.strictEqual(logRes.Code, 200, "AdminLog should return 200");
+  assert.ok(logRes.Log.length > 0, "AdminLog should be populated");
+  assert.ok(logRes.Log.some((entry: any) => entry.Action === "UserBanned"), "Bans should be audited");
+  assert.ok(logRes.Log.some((entry: any) => entry.Action === "Broadcast"), "Broadcasts should be audited");
+  assert.ok(logRes.Log.every((entry: any) => entry.Actor), "Log entries should identify the actor");
+  const moderatorLog = await sendReq("AdminLog", {}, moderator.token, moderator.id);
+  assert.strictEqual(moderatorLog.Code, 200, "Moderators should be able to read the audit log");
+  console.log("✔ Admin audit log verified");
+
   ws.close();
+  cleanupTestData();
   console.log("\n==============================================");
-  console.log("🎉 ALL 12 TESTS PASSED PERFECTLY!");
+  console.log("🎉 ALL TESTS PASSED PERFECTLY!");
   console.log("==============================================");
   process.exit(0);
 }
 
 runTests().catch((err) => {
   console.error("❌ Test failed:", err);
+  try {
+    // Failures must not leave test accounts or content behind either.
+    cleanupTestData();
+  } catch (cleanupErr) {
+    console.error("⚠ Test cleanup failed:", cleanupErr);
+  }
   process.exit(1);
 });

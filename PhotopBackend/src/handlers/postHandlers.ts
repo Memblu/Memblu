@@ -159,7 +159,9 @@ export function handleCreatePost(
   };
 }
 
-export function handleUpdatePost(body: any, currentUser: UserRecord | null): any {
+export type BroadcastDeletedPost = (postId: string) => void;
+
+export function handleUpdatePost(body: any, currentUser: UserRecord | null, broadcastDeletedPost?: BroadcastDeletedPost): any {
   if (!currentUser) {
     return { Code: 401, Message: "Not authenticated." };
   }
@@ -178,6 +180,10 @@ export function handleUpdatePost(body: any, currentUser: UserRecord | null): any
       return { Code: 403, Message: "Permission denied." };
     }
     db.prepare("UPDATE posts SET deleted = 1 WHERE id = ?").run(PostID);
+    db.prepare("UPDATE users SET profile_data = replace(profile_data, ?, '') WHERE profile_data LIKE ?").run(`"PinnedPost":"${PostID}"`, `%"PinnedPost":"${PostID}"%`);
+    if (broadcastDeletedPost) {
+      broadcastDeletedPost(PostID);
+    }
     return { Code: 200 };
   }
 

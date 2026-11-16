@@ -22,6 +22,8 @@ import {
   handleGetChats,
   handleCreateChat,
   handleUpdateChat,
+  handleLikeChat,
+  handleUnlikeChat,
   handleGetLiveCount
 } from "./handlers/chatHandlers.js";
 import {
@@ -49,6 +51,20 @@ import {
   handleUnbanUser,
   handlePostWebhook
 } from "./handlers/moderationHandlers.js";
+import { handleLoadPlatformEmbeds } from "./handlers/embedHandlers.js";
+import {
+  handleAdminOverview,
+  handleAdminGetUsers,
+  handleAdminGetUser,
+  handleAdminUpdateUser,
+  handleAdminGetContent,
+  handleAdminContentAction,
+  handleAdminReports,
+  handleAdminAppeals,
+  handleAdminBroadcast,
+  handleAdminSessions,
+  handleAdminLog
+} from "./handlers/adminHandlers.js";
 
 interface ExtendedSocket extends WebSocket {
   isAlive: boolean;
@@ -125,6 +141,25 @@ export function createWebSocketServer(server: any) {
     }
   }
 
+  function broadcastChatLikes(chatId: string, postId: string, likes: number, userId: string, liked: boolean) {
+    const packet = JSON.stringify({
+      Metadata: { ReqSource: "Server" },
+      Body: {
+        ClientFunction: "UpdateChatLikes",
+        ChatID: chatId,
+        PostID: postId,
+        Likes: likes,
+        LikedBy: userId,
+        IsLiked: liked
+      }
+    });
+    for (const s of allSockets) {
+      if (s.readyState === WebSocket.OPEN) {
+        s.send(packet);
+      }
+    }
+  }
+
   function broadcastChat(postId: string, chat: any, author: any, reply?: any) {
     const packet = JSON.stringify({
       Metadata: { ReqSource: "Server" },
@@ -162,6 +197,22 @@ export function createWebSocketServer(server: any) {
     }
   }
 
+  function broadcastDeletedPost(postId: string) {
+    const packet = JSON.stringify({
+      Metadata: { ReqSource: "Server" },
+      Body: {
+        ClientFunction: "NewPostDeleted",
+        PostIDs: [postId]
+      }
+    });
+
+    for (const s of allSockets) {
+      if (s.readyState === WebSocket.OPEN) {
+        s.send(packet);
+      }
+    }
+  }
+
   function pushBanToUser(userId: string, banData: any) {
     const packet = JSON.stringify({
       Metadata: { ReqSource: "Server" },
@@ -174,6 +225,75 @@ export function createWebSocketServer(server: any) {
       if (s.userId === userId && s.readyState === WebSocket.OPEN) {
         s.send(packet);
       }
+    }
+  }
+
+  function sendToAll(body: any): number {
+    const packet = JSON.stringify({
+      Metadata: { ReqSource: "Server" },
+      Body: body
+    });
+    let delivered = 0;
+    for (const s of allSockets) {
+      if (s.readyState === WebSocket.OPEN) {
+        s.send(packet);
+        delivered++;
+      }
+    }
+    return delivered;
+  }
+
+  function pushSessionRevoked(userId: string, ip?: string | null) {
+    const packet = JSON.stringify({
+      Metadata: { ReqSource: "Server" },
+      Body: {
+        ClientFunction: "AdminSessionRevoked",
+        Reason: ip ? "Your session on this device was signed out by an administrator." : "An administrator signed out all of your sessions."
+      }
+    });
+    for (const s of allSockets) {
+      if (s.userId === userId && s.readyState === WebSocket.OPEN && (!ip || s.clientIp === ip)) {
+        s.userId = undefined;
+        s.send(packet);
+      }
+    }
+  }
+
+  // Admin handlers return data plus a few side-effect hints. This keeps the
+  // handlers independent from the socket layer while still broadcasting the
+  // same real-time packets normal moderation already uses.
+  function applyAdminResultEffects(result: any): void {
+    if (!result || result.Code !== 200) return;
+
+    if (result.BanTarget) {
+      pushBanToUser(result.BanTarget.UserID, result.BanTarget.BanData);
+    }
+    if (result.RevokeSessionsFor) {
+      pushSessionRevoked(result.RevokeSessionsFor, result.RevokeIP || null);
+    }
+    if (Array.isArray(result.DeletedPostIDs)) {
+      for (const id of result.DeletedPostIDs) {
+        if (id) broadcastDeletedPost(id);
+      }
+    }
+    if (Array.isArray(result.DeletedChatIDs)) {
+      for (const id of result.DeletedChatIDs) {
+        if (id) broadcastDeletedChat("", id);
+      }
+    }
+    if (Array.isArray(result.RestoredPostIDs) || Array.isArray(result.RestoredChatIDs)) {
+      sendToAll({ ClientFunction: "AdminForceRefresh", Mode: "Feed", Message: null });
+    }
+    if (result.Broadcast) {
+      const broadcast = result.Broadcast;
+      const clientFunction = broadcast.Mode === "Announcement" ? "AdminAnnouncement" : "AdminForceRefresh";
+      result.Delivered = sendToAll({
+        ClientFunction: clientFunction,
+        Mode: broadcast.Mode,
+        Message: broadcast.Message,
+        Level: broadcast.Level
+      });
+      delete result.Broadcast;
     }
   }
 
@@ -251,7 +371,7 @@ export function createWebSocketServer(server: any) {
             result = handleCreatePost(Body, currentUser, broadcastNewPost);
             break;
           case "UpdatePost":
-            result = handleUpdatePost(Body, currentUser);
+            result = handleUpdatePost(Body, currentUser, broadcastDeletedPost);
             break;
           case "LikePost":
             result = handleLikePost(Body, currentUser, broadcastPostLikes);
@@ -262,10 +382,10 @@ export function createWebSocketServer(server: any) {
 
           // Chats
           case "ConnectLiveChat":
-            result = handleConnectLiveChat(Body, (pids) => subscribeRooms(socket, pids));
+            result = handleConnectLiveChat(Body, (pids) => subscribeRooms(socket, pids), currentUser);
             break;
           case "GetChats":
-            result = handleGetChats(Body);
+            result = handleGetChats(Body, currentUser);
             break;
           case "CreateChat":
             result = handleCreateChat(Body, currentUser, broadcastChat);
@@ -277,6 +397,12 @@ export function createWebSocketServer(server: any) {
             break;
           case "UpdateChat":
             result = handleUpdateChat(Body, currentUser, broadcastDeletedChat);
+            break;
+          case "LikeChat":
+            result = handleLikeChat(Body, currentUser, broadcastChatLikes);
+            break;
+          case "UnlikeChat":
+            result = handleUnlikeChat(Body, currentUser, broadcastChatLikes);
             break;
           case "GetLiveCount":
             result = handleGetLiveCount(Body, getRoomCount);
@@ -302,7 +428,7 @@ export function createWebSocketServer(server: any) {
             result = handleGetProfileLikes(Body, currentUser);
             break;
           case "GetProfileChats":
-            result = handleGetProfileChats(Body);
+            result = handleGetProfileChats(Body, currentUser);
             break;
           case "Search":
             result = handleSearch(Body);
@@ -342,7 +468,48 @@ export function createWebSocketServer(server: any) {
             result = handleUnbanUser(Body, currentUser);
             break;
           case "PostWebhook":
-            result = handlePostWebhook(Body);
+            result = handlePostWebhook(Body, currentUser);
+            break;
+
+          // Admin panel
+          case "AdminOverview":
+            result = handleAdminOverview(currentUser);
+            if (result.Code === 200) result.ConnectedClients = allSockets.size;
+            break;
+          case "AdminUsers":
+            result = handleAdminGetUsers(Body, currentUser);
+            break;
+          case "AdminUserDetail":
+            result = handleAdminGetUser(Body, currentUser);
+            break;
+          case "AdminUpdateUser":
+            result = handleAdminUpdateUser(Body, currentUser);
+            applyAdminResultEffects(result);
+            break;
+          case "AdminContent":
+            result = handleAdminGetContent(Body, currentUser);
+            break;
+          case "AdminContentAction":
+            result = handleAdminContentAction(Body, currentUser);
+            applyAdminResultEffects(result);
+            break;
+          case "AdminReports":
+            result = handleAdminReports(Body, currentUser);
+            applyAdminResultEffects(result);
+            break;
+          case "AdminAppeals":
+            result = handleAdminAppeals(Body, currentUser);
+            break;
+          case "AdminBroadcast":
+            result = handleAdminBroadcast(Body, currentUser);
+            applyAdminResultEffects(result);
+            break;
+          case "AdminSessions":
+            result = handleAdminSessions(Body, currentUser);
+            applyAdminResultEffects(result);
+            break;
+          case "AdminLog":
+            result = handleAdminLog(currentUser);
             break;
 
           // Stubs for third-party embeds
@@ -350,7 +517,7 @@ export function createWebSocketServer(server: any) {
             result = { Code: 200, Links: {} };
             break;
           case "LoadPlatformEmbeds":
-            result = { Code: 200, EmbedData: {}, UserData: {} };
+            result = handleLoadPlatformEmbeds(Body);
             break;
           case "Analytics":
             result = { Code: 200 };

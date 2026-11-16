@@ -67,6 +67,44 @@ function SetUsernameRole(TextHolder, UserData, FontSize, LimitSingleBadge) {
   }
   TextHolder.innerHTML = FullString;
 }
+function ParseRoleList(Roles) {
+  if (Roles == null) return [];
+  if (Array.isArray(Roles) == true) {
+    var List = [];
+    for (var i = 0; i < Roles.length; i++) List.push(String(Roles[i]));
+    return List;
+  }
+  var Text = String(Roles).trim();
+  if (Text.length == 0) return [];
+  if (Text.charAt(0) == "[") {
+    try {
+      var Parsed = JSON.parse(Text);
+      if (Array.isArray(Parsed) == true) {
+        var ParsedList = [];
+        for (var p = 0; p < Parsed.length; p++) ParsedList.push(String(Parsed[p]));
+        return ParsedList;
+      }
+    } catch (e) {
+      // Fall back to the comma/plain handling below.
+    }
+  }
+  if (Text.indexOf(",") >= 0) {
+    var Parts = Text.split(",");
+    var CleanParts = [];
+    for (var c = 0; c < Parts.length; c++) {
+      var Part = Parts[c].trim();
+      if (Part.length > 0) CleanParts.push(Part);
+    }
+    return CleanParts;
+  }
+  return [Text];
+}
+
+function HasAdminAccess(Roles) {
+  var RoleList = ParseRoleList(Roles);
+  return RoleList.indexOf("Owner") >= 0 || RoleList.indexOf("Moderator") >= 0;
+}
+
 function CheckPermision(Roles, Permision) {
   if (Roles != null && Permision != null) {
     var Permisions = {};
@@ -84,7 +122,10 @@ function CheckPermision(Roles, Permision) {
         }
       }
     } else {
-      Permisions = RoleTypes[Roles][1];
+      var SingleRoleData = RoleTypes[Roles];
+      // Basic accounts use the "User" role, which has no entry in RoleTypes.
+      // Treat them as having no special permissions instead of throwing.
+      Permisions = SingleRoleData != null ? SingleRoleData[1] : {};
     }
     return Permisions[Permision] == true;
   }
@@ -163,22 +204,35 @@ async function CreatePostButtons(ID, Data, UserData, PostContainer, IsLikingPost
   if (Data.Likes == null) {
     Data.Likes = 0;
   }
-  LikePostButton.textContent = Data.Likes;
-  if (Data.IsLiked == true) {
-    var LikeSVGImage = createSVGButtonImage(ID + "Likes", 20, "#FF5786", {Color: "#FF5786", Size: 0}, ["m471.382812 44.578125c-26.503906-28.746094-62.871093-44.578125-102.410156-44.578125-29.554687 0-56.621094 9.34375-80.449218 27.769531-12.023438 9.300781-22.917969 20.679688-32.523438 33.960938-9.601562-13.277344-20.5-24.660157-32.527344-33.960938-23.824218-18.425781-50.890625-27.769531-80.445312-27.769531-39.539063 0-75.910156 15.832031-102.414063 44.578125-26.1875 28.410156-40.613281 67.222656-40.613281 109.292969 0 43.300781 16.136719 82.9375 50.78125 124.742187 30.992188 37.394531 75.535156 75.355469 127.117188 119.3125 17.613281 15.011719 37.578124 32.027344 58.308593 50.152344 5.476563 4.796875 12.503907 7.4375 19.792969 7.4375 7.285156 0 14.316406-2.640625 19.785156-7.429687 20.730469-18.128907 40.707032-35.152344 58.328125-50.171876 51.574219-43.949218 96.117188-81.90625 127.109375-119.304687 34.644532-41.800781 50.777344-81.4375 50.777344-124.742187 0-42.066407-14.425781-80.878907-40.617188-109.289063zm088-109.289063zm0 0"]);
-    setCSS(LikePostButton, "color", "#FF5786");
-    LikePostButton.setAttribute("title", "Unlike Post");
 
-    if (FromClick == true) {
-      LikeSVGImage.animate([
-        { width: "70%", height: "40px", left: "-48px", top: "-15px", offset: 0.3 },
-        { width: "25%", height: "100%", },
-      ], 150);
+  var FilledHeartPath = "m471.382812 44.578125c-26.503906-28.746094-62.871093-44.578125-102.410156-44.578125-29.554687 0-56.621094 9.34375-80.449218 27.769531-12.023438 9.300781-22.917969 20.679688-32.523438 33.960938-9.601562-13.277344-20.5-24.660157-32.527344-33.960938-23.824218-18.425781-50.890625-27.769531-80.445312-27.769531-39.539063 0-75.910156 15.832031-102.414063 44.578125-26.1875 28.410156-40.613281 67.222656-40.613281 109.292969 0 43.300781 16.136719 82.9375 50.78125 124.742187 30.992188 37.394531 75.535156 75.355469 127.117188 119.3125 17.613281 15.011719 37.578124 32.027344 58.308593 50.152344 5.476563 4.796875 12.503907 7.4375 19.792969 7.4375 7.285156 0 14.316406-2.640625 19.785156-7.429687 20.730469-18.128907 40.707032-35.152344 58.328125-50.171876 51.574219-43.949218 96.117188-81.90625 127.109375-119.304687 34.644532-41.800781 50.777344-81.4375 50.777344-124.742187 0-42.066407-14.425781-80.878907-40.617188-109.289063zm088-109.289063zm0 0";
+  var OutlineHeartPath = "m256 455.515625c-7.289062 0-14.316406-2.640625-19.792969-7.4375-20.683593-18.085937-40.625-35.082031-58.21875-50.074219l-.089843-.078125c-51.582032-43.957031-96.125-81.917969-127.117188-119.3125-34.644531-41.804687-50.78125-81.441406-50.78125-124.742187 0-42.070313 14.425781-80.882813 40.617188-109.292969 26.503906-28.746094 62.871093-44.578125 102.414062-44.578125 29.554688 0 56.621094 9.34375 80.445312 27.769531 12.023438 9.300781 22.921876 20.683594 32.523438 33.960938 9.605469-13.277344 20.5-24.660157 32.527344-33.960938 23.824218-18.425781 50.890625-27.769531 80.445312-27.769531 39.539063 0 75.910156 15.832031 102.414063 44.578125 26.191406 28.410156 40.613281 67.222656 40.613281 109.292969 0 43.300781-16.132812 82.9375-50.777344 124.738281-30.992187 37.398437-75.53125 75.355469-127.105468 119.308594-17.625 15.015625-37.597657 32.039062-58.328126 50.167969-5.472656 4.789062-12.503906 7.429687-19.789062 7.429687zm-112.96875-425.523437c-31.066406 0-59.605469 12.398437-80.367188 34.914062-21.070312 22.855469-32.675781 54.449219-32.675781 88.964844 0 36.417968 13.535157 68.988281 43.882813 105.605468 29.332031 35.394532 72.960937 72.574219 123.476562 115.625l.09375.078126c17.660156 15.050781 37.679688 32.113281 58.515625 50.332031 20.960938-18.253907 41.011719-35.34375 58.707031-50.417969 50.511719-43.050781 94.136719-80.222656 123.46875-115.617188 30.34375-36.617187 43.878907-69.1875 43.878907-105.605468 0-34.515625-11.605469-66.109375-32.675781-88.964844-20.757813-22.515625-49.300782-34.914062-80.363282-34.914062-22.757812 0-43.652344 7.234374-62.101562 21.5-16.441406 12.71875-27.894532 28.796874-34.609375 40.046874-3.453125 5.785157-9.53125 9.238282-16.261719 9.238282s-12.808594-3.453125-16.261719-9.238282c-6.710937-11.25-18.164062-27.328124-34.609375-40.046874-18.449218-14.265626-39.34375-21.5-62.097656-21.5zm0 0";
+
+  // Update the like button in place. Rebuilding the whole PostButtonHolder made the
+  // post card resize and briefly hide every button (most obvious in mobile immersive view).
+  function RenderLikeButton(Animate) {
+    LikePostButton.textContent = Data.Likes;
+    var OldSVG = find(ID + "LikesSvg");
+    if (OldSVG != null) {
+      OldSVG.remove();
     }
-  } else {
-    LikePostButton.setAttribute("title", "Like Post");
-    createSVGButtonImage(ID + "Likes", 20, "#999999", {Color: FontColorA, Size: 0}, ["m256 455.515625c-7.289062 0-14.316406-2.640625-19.792969-7.4375-20.683593-18.085937-40.625-35.082031-58.21875-50.074219l-.089843-.078125c-51.582032-43.957031-96.125-81.917969-127.117188-119.3125-34.644531-41.804687-50.78125-81.441406-50.78125-124.742187 0-42.070313 14.425781-80.882813 40.617188-109.292969 26.503906-28.746094 62.871093-44.578125 102.414062-44.578125 29.554688 0 56.621094 9.34375 80.445312 27.769531 12.023438 9.300781 22.921876 20.683594 32.523438 33.960938 9.605469-13.277344 20.5-24.660157 32.527344-33.960938 23.824218-18.425781 50.890625-27.769531 80.445312-27.769531 39.539063 0 75.910156 15.832031 102.414063 44.578125 26.191406 28.410156 40.613281 67.222656 40.613281 109.292969 0 43.300781-16.132812 82.9375-50.777344 124.738281-30.992187 37.398437-75.53125 75.355469-127.105468 119.308594-17.625 15.015625-37.597657 32.039062-58.328126 50.167969-5.472656 4.789062-12.503906 7.429687-19.789062 7.429687zm-112.96875-425.523437c-31.066406 0-59.605469 12.398437-80.367188 34.914062-21.070312 22.855469-32.675781 54.449219-32.675781 88.964844 0 36.417968 13.535157 68.988281 43.882813 105.605468 29.332031 35.394532 72.960937 72.574219 123.476562 115.625l.09375.078126c17.660156 15.050781 37.679688 32.113281 58.515625 50.332031 20.960938-18.253907 41.011719-35.34375 58.707031-50.417969 50.511719-43.050781 94.136719-80.222656 123.46875-115.617188 30.34375-36.617187 43.878907-69.1875 43.878907-105.605468 0-34.515625-11.605469-66.109375-32.675781-88.964844-20.757813-22.515625-49.300782-34.914062-80.363282-34.914062-22.757812 0-43.652344 7.234374-62.101562 21.5-16.441406 12.71875-27.894532 28.796874-34.609375 40.046874-3.453125 5.785157-9.53125 9.238282-16.261719 9.238282s-12.808594-3.453125-16.261719-9.238282c-6.710937-11.25-18.164062-27.328124-34.609375-40.046874-18.449218-14.265626-39.34375-21.5-62.097656-21.5zm0 0"]);
+    if (Data.IsLiked == true) {
+      var LikeSVGImage = createSVGButtonImage(ID + "Likes", 20, "#FF5786", {Color: "#FF5786", Size: 0}, [FilledHeartPath]);
+      setCSS(LikePostButton, "color", "#FF5786");
+      LikePostButton.setAttribute("title", "Unlike Post");
+
+      if (Animate == true) {
+        LikeSVGImage.animate([
+          { width: "70%", height: "40px", left: "-48px", top: "-15px", offset: 0.3 },
+          { width: "25%", height: "100%", },
+        ], 150);
+      }
+    } else {
+      LikePostButton.setAttribute("title", "Like Post");
+      createSVGButtonImage(ID + "Likes", 20, "#999999", {Color: FontColorA, Size: 0}, [OutlineHeartPath]);
+    }
   }
+  RenderLikeButton(FromClick == true);
 
   var QuotePostButton = createElement(ID + "Quotes", "div", ID + "PostButtonHolder", [
     ["position", "relative"],
@@ -249,33 +303,19 @@ async function CreatePostButtons(ID, Data, UserData, PostContainer, IsLikingPost
   
   LikePostButton.addEventListener("click", function() {
     if (UserID != null) {
-      PostButtonHolder.remove();
       LikePost(ID, Data.IsLiked);
       if (Data.IsLiked == false) {
         Data.Likes += 1;
         Data.IsLiked = true;
       } else {
-        Data.Likes -= 1;
+        if (Data.Likes > 0) {
+          Data.Likes -= 1;
+        }
         Data.IsLiked = false;
       }
       Data.Chats = ChatElementCount.textContent;
-      /*
-      if (IsLikeData != null) {
-        var SetNewLikeData = [];
-        for (var l = 0; l < IsLikeData.length; l++) {
-          if (IsLikeData[l]._id != (ID + UserID)) {
-            SetNewLikeData.push({ _id: IsLikeData[l]._id });
-          }
-        }
-        if (IsLikingPost == true) {
-          SetNewLikeData.push({ _id: (ID + UserID) })
-        }
-        IsLikeData = SetNewLikeData;
-        console.log(IsLikeData)
-      }
-      */
       IsLikingPost = Data.IsLiked;
-      CreatePostButtons(ID, Data, UserData, PostContainer, IsLikingPost, true, IsLikeData);
+      RenderLikeButton(true);
     } else {
       ShowPopUp("It's Better Together", "Join the hangout today! You must <b>sign in</b> or <b>sign up</b> before being able to <b style='color: #FF5786'>Like</b> a post!", [ ["Sign In", ThemeColor, "StartSignIn"], ["Sign Up", "#2AF5B5", "StartSignUp"], ["Later", "#B3B3B3", null] ]);
     }
@@ -304,6 +344,10 @@ async function CreatePostButtons(ID, Data, UserData, PostContainer, IsLikingPost
     }
   });
   ChatElementCount.addEventListener("click", function() {
+    if (MobileVersion == true && find("LiveChatHolder") != null && find("LiveChatHolder").hasAttribute("Open") == false) {
+      OpenMobileChat(ID); // On mobile this tap opens the full-screen post view.
+      return;
+    }
     if (UserID == null) {
       ShowPopUp("It's Better Together", "Join the hangout today! You must <b>sign in</b> or <b>sign up</b> before being able to <b style='color: " + ThemeColor + "'>Chat</b> on a post!", [ ["Sign In", ThemeColor, "StartSignIn"], ["Sign Up", "#2AF5B5", "StartSignUp"], ["Later", "#B3B3B3", null] ]);
       return "NotLoggedIn";
@@ -317,6 +361,10 @@ async function CreatePostButtons(ID, Data, UserData, PostContainer, IsLikingPost
       TextBoxType.focus();
     }
   });
+
+  if (typeof MobilePostViewAdoptButtons == "function") {
+    MobilePostViewAdoptButtons(ID, PostButtonHolder);
+  }
 }
 
 async function CreatePostView(ID, Data, UserData, Parent, IsLikingPost, IsLikeData) {
@@ -592,36 +640,25 @@ async function CreatePostView(ID, Data, UserData, Parent, IsLikingPost, IsLikeDa
   
   if (MobileVersion == true) {
     var swiper = new Swipe(PostContainer);
-    swiper.onLeft(async function() {
-      if (find("NavButtonHolder").hasAttribute("Open") == false) {
-        ScrolledToMobile = window.scrollY;
-        //setCSS("PostContent", "display", "hidden");
-        
-        //DisableScrolling();
-
-        var MobileChatHolder = find("LiveChatHolder");
-        MobileChatHolder.setAttribute("Open", "");
-
-        setCSS(Chat, "display", "flex");
-        setCSS(Chat, "width", "calc(100% - 16px)");
-        setCSS(Chat, "height", "calc(100% - 16px)"); //(window.innerHeight - 16) + "px");
-        setCSS(Chat, "max-height", (window.innerHeight - 16) + "px");
-        setCSS(Chat, "left", "8px");
-        setCSS(Chat, "top", "8px");
-        removeCSS(Chat, "right");
-
-        MobileChatHolder.appendChild(Chat);
-        ChatContainer.scrollTo(0, ChatContainer.scrollHeight);
-        //setCSS(MobileChatHolder, "display", "block");
-        MobileChatHolder.style.left = "0%";
-        await sleep(400);
-
-        setCSS("Primary", "overflow", "hidden");
-        setCSS("body", "position", "fixed");
-        //setCSS("body", "scroll-behavior", "none");
-      }
+    swiper.onLeft(function() {
+      OpenMobileChat(ID);
     });
     swiper.run();
+
+    // Tapping the post opens the full-screen post + live chat view. Taps on interactive bits
+    // (likes, links, images, usernames, embeds) keep doing their own thing.
+    PostContainer.addEventListener("click", function(event) {
+      if (event.target == null || event.target.closest == null) {
+        return;
+      }
+      if (event.target.closest('[LoadUserID], [TypeRender], a, img, video, iframe, [id$="PostButtonHolder"], [id$="Chat"], [FunctionHoverClickData], [id$="ChatLike"]') != null) {
+        return;
+      }
+      if (window.getSelection != null && window.getSelection().toString().length > 0) {
+        return;
+      }
+      OpenMobileChat(ID);
+    });
   }
 
   createElement(ID + "ChatTopMessage", "div", ChatContainer, [
@@ -1258,6 +1295,11 @@ find("body").addEventListener("mousedown", function(event) {
 
   var Path = event.path || (event.composedPath && event.composedPath());
 
+  // Chat like buttons handle their own click; don't open the chat dropdown over them.
+  if (Path[0].closest != null && Path[0].closest('[id$="ChatLike"]') != null) {
+    return;
+  }
+
   if (Path[0].hasAttribute("LoadUserID") == true) {
     CreateUserPreview(Path[0], 4, Path[0].getAttribute("LoadUserID"));
     return;
@@ -1398,7 +1440,7 @@ find("body").addEventListener("mousedown", function(event) {
   if (WasChatItem == true) {
     return;
   }
-  if (PostBody != null) {
+  if (PostBody != null && MobileVersion != true) { // Desktop-only inline expand; mobile uses the full-screen post view.
     var MediaHolder = find(PostBody.id + "MediaHolder");
     if (MediaHolder != null) {
       var MediaHolderRect = MediaHolder.getBoundingClientRect();

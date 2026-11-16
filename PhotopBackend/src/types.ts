@@ -62,6 +62,7 @@ export interface ChatRecord {
   timestamp: number;
   reply_id?: string | null;
   hidden: number; // 0 or 1
+  likes: number;
 }
 
 export interface LikeRecord {

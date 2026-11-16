@@ -1,22 +1,6 @@
 
 var ProfileUserData = {};
 
-function CreateMiniTextNotif(Parent, Text) {
-  var NewMiniNotif = createElement("MiniNotif", "div", Parent, [
-    ["position", "relative"],
-    ["margin", "24px 20px 24px 20px"],
-
-    // Text:
-    ["font-size", "20px"],
-    ["font-family", FontTypeA],
-    ["font-weight", "500"],
-    ["color", FontColorA],
-    ["text-align", "center"]
-  ]);
-  NewMiniNotif.textContent = Text;
-  return NewMiniNotif;
-}
-
 async function LoadProfile(ProfileUserID, IgnoreAlreadyOn) {
   if (IgnoreAlreadyOn != true && CurrentPage == "Profile" && ViewingProfileID == ProfileUserID) {
     window.scrollTo(window.scrollX, 0);

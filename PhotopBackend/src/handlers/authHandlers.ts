@@ -95,10 +95,6 @@ export function handleSignInAccount(body: any, clientIp: string): any {
     return { Code: 403, Message: "Incorrect username or password." };
   }
 
-  if (user.status === "banned") {
-    return { Code: 403, Message: "Account banned." };
-  }
-
   if (user.status === "disabled" || user.status === "pending_delete") {
     return {
       Code: 409,
@@ -112,6 +108,11 @@ export function handleSignInAccount(body: any, clientIp: string): any {
   const profileData = JSON.parse(user.profile_data || "{}");
   const blockedUsers = JSON.parse(user.blocked_users || "[]");
 
+  // Banned accounts can still sign in so they can read the ban reason and
+  // submit an appeal. The client shows a blocking ban notice for BanData and
+  // does not start a normal session UI.
+  const banData = user.status === "banned" ? banDataFor(user) : null;
+
   return {
     Code: 200,
     RealUser: user.user,
@@ -122,7 +123,23 @@ export function handleSignInAccount(body: any, clientIp: string): any {
     Role: user.role,
     BlockedUsers: blockedUsers,
     Token: session.token,
-    TokenExpireDuration: session.expireDuration
+    TokenExpireDuration: session.expireDuration,
+    BanData: banData
+  };
+}
+
+function banDataFor(user: UserRecord): any {
+  try {
+    const parsed = JSON.parse(user.ban_data || "{}");
+    if (parsed && parsed.BanReason) return parsed;
+  } catch {
+    // Fall through to the default notice below.
+  }
+  return {
+    Account: user.user,
+    BanReason: "Violating community guidelines.",
+    BanExpires: "Permanent",
+    Appealed: false
   };
 }
 
@@ -130,6 +147,9 @@ export function handleGetAccountData(user: UserRecord | null): any {
   if (!user) {
     return { Code: 401, Message: "Not authenticated." };
   }
+
+  // Reloading the page as a banned user should still surface the ban notice.
+  const banData = user.status === "banned" ? banDataFor(user) : null;
 
   return {
     Code: 200,
@@ -141,7 +161,8 @@ export function handleGetAccountData(user: UserRecord | null): any {
       Settings: JSON.parse(user.settings || "{}"),
       ProfileData: JSON.parse(user.profile_data || "{}"),
       BlockedUsers: JSON.parse(user.blocked_users || "[]")
-    }
+    },
+    BanData: banData
   };
 }
 

@@ -80,7 +80,73 @@ export function handleUnbanUser(body: any, currentUser: UserRecord | null): any 
   return { Code: 200 };
 }
 
-export function handlePostWebhook(body: any): any {
+export function handlePostWebhook(body: any, currentUser: UserRecord | null = null): any {
+  if (body && body.Webhook === "Report" && body.Details) {
+    const details = body.Details;
+    const type = ["User", "Post", "Chat"].includes(details.Type) ? details.Type : "User";
+    const contentId = details.ReportContentID;
+    const reason = String(details.Reason || "Other").slice(0, 500);
+
+    if (contentId) {
+      const reporterId = currentUser ? currentUser.id : null;
+      const duplicate = reporterId
+        ? db.prepare(`
+            SELECT id FROM reports
+            WHERE reporter_id = ? AND content_type = ? AND content_id = ? AND status = 'open'
+          `).get(reporterId, type, contentId)
+        : null;
+
+      if (!duplicate) {
+        const snapshot: any = { Type: type, ContentID: contentId };
+        if (type === "User") {
+          const target = db.prepare(`
+            SELECT id, user, role, status, creation_time, ban_data FROM users WHERE id = ?
+          `).get(contentId) as any;
+          if (target) {
+            snapshot.TargetUserID = target.id;
+            snapshot.TargetUser = target.user;
+            snapshot.TargetRole = target.role;
+            snapshot.TargetStatus = target.status;
+            snapshot.TargetCreated = target.creation_time;
+          }
+        } else if (type === "Post") {
+          const post = db.prepare(`
+            SELECT p.id, p.user_id, p.text, p.timestamp, p.deleted, u.user, u.role
+            FROM posts p LEFT JOIN users u ON u.id = p.user_id WHERE p.id = ?
+          `).get(contentId) as any;
+          if (post) {
+            snapshot.TargetUserID = post.user_id;
+            snapshot.TargetUser = post.user;
+            snapshot.TargetRole = post.role;
+            snapshot.Text = post.text;
+            snapshot.Timestamp = post.timestamp;
+            snapshot.Removed = post.deleted === 1;
+          }
+        } else if (type === "Chat") {
+          const chat = db.prepare(`
+            SELECT c.id, c.post_id, c.user_id, c.text, c.timestamp, c.hidden, u.user, u.role
+            FROM chats c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = ?
+          `).get(contentId) as any;
+          if (chat) {
+            snapshot.TargetUserID = chat.user_id;
+            snapshot.TargetUser = chat.user;
+            snapshot.TargetRole = chat.role;
+            snapshot.Text = chat.text;
+            snapshot.PostID = chat.post_id;
+            snapshot.Timestamp = chat.timestamp;
+            snapshot.Removed = chat.hidden === 1;
+          }
+        }
+
+        db.prepare(`
+          INSERT INTO reports
+            (id, reporter_id, content_type, content_id, reason, snapshot, status, timestamp)
+          VALUES (?, ?, ?, ?, ?, ?, 'open', ?)
+        `).run(generateId(), reporterId, type, contentId, reason, JSON.stringify(snapshot), Date.now());
+      }
+    }
+  }
+
   console.log("[Webhook/Report Received]:", JSON.stringify(body));
   return { Code: 200 };
 }

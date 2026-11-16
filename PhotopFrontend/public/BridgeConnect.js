@@ -203,6 +203,10 @@ function ConnectToBridge() {
                 UserEmail = Data.UserData.Email;
                 BlockedUsers = Data.UserData.BlockedUsers || [];
                 AuthUpdate(true);
+                if (Data.BanData != null) {
+                  ShowBanNotice(Data.BanData);
+                  return;
+                }
                 LoadFromURLOrPosts();
                 CheckForUnbanURL();
               } else if (Data.Code == 401) {
@@ -366,6 +370,7 @@ function AuthUpdate(IsAuth) {
     setCSS(PostNavButton, "display", "flex");
     setCSS(YourProfileButton, "display", "flex");
     setCSS(SettingsButton, "display", "flex");
+    setCSS(AdminPanelButton, "display", HasAdminAccess(LoginUserRole) == true ? "flex" : "none");
     find("CreatePostUser").textContent = Username;
     find("CreatePostUser").setAttribute("title", "Signed In as " + Username);
     setCSS("CreatePostProfilePic", "content", "url('" + GoogleCloudStorgeURL + "ProfileImages/" + (Settings.ProfilePic || "DefaultProfilePic") + "')");
@@ -391,6 +396,7 @@ function AuthUpdate(IsAuth) {
     setCSS(PostNavButton, "display", "none");
     setCSS(YourProfileButton, "display", "none");
     setCSS(SettingsButton, "display", "none");
+    setCSS(AdminPanelButton, "display", "none");
     find("CreatePostUser").textContent = "Signed Out";
     find("CreatePostUser").setAttribute("title", "Signed Out");
     UpdatePostCharTextCounter(0);
@@ -469,7 +475,13 @@ async function LoginToAccount(Data) {
 
       SetAuthToken(Data.Token, Data.TokenExpireDuration);
       AuthUpdate(true);
-      
+
+      if (Data.BanData != null) {
+        // Banned users can still sign in to read the notice and appeal.
+        ShowBanNotice(Data.BanData);
+        return;
+      }
+
       TextFieldSignInUsername.value = "";
       TextFieldSignInPassword.value = "";
 
@@ -820,6 +832,25 @@ function ProcessPostsFromServer(Data, Filter, CustomHolder) {
 
   SetupPostChats(false);
   LoadEmbedPreviews();
+}
+
+// Shared helper. Lives here (always loaded) instead of Profile.js (lazy-loaded) because the
+// feed calls it when fewer posts than requested come back, which previously threw a
+// ReferenceError before SetupPostChats() ran, so live chats never loaded.
+function CreateMiniTextNotif(Parent, Text) {
+  var NewMiniNotif = createElement("MiniNotif", "div", Parent, [
+    ["position", "relative"],
+    ["margin", "24px 20px 24px 20px"],
+
+    // Text:
+    ["font-size", "20px"],
+    ["font-family", FontTypeA],
+    ["font-weight", "500"],
+    ["color", FontColorA],
+    ["text-align", "center"]
+  ]);
+  NewMiniNotif.textContent = Text;
+  return NewMiniNotif;
 }
 
 var GettingNewPosts = false;
@@ -1490,6 +1521,122 @@ async function LikePost(PostID, IsLiking) {
   });
 }
 
+function ChatLikeColor(IsLiked) {
+  return IsLiked ? "#FF5786" : "#999999";
+}
+
+function CreateChatLikeButton(ChatID, ChatMessage, Likes, IsLiked) {
+  Likes = Number(Likes) || 0;
+  var LikeButton = createElement(ChatID + "ChatLike", "div", ChatMessage, [
+    ["position", "absolute"],
+    ["display", "flex"],
+    ["align-items", "center"],
+    ["justify-content", "center"],
+    ["right", "5px"],
+    ["bottom", "2px"],
+    ["height", "18px"],
+    ["min-width", "30px"],
+    ["padding-left", "3px"],
+    ["padding-right", "3px"],
+    ["z-index", "7"],
+    ["border-radius", "9px"],
+    ["cursor", "pointer"],
+    ["background-color", "rgba(0, 0, 0, 0.12)"],
+    ["font-family", FontTypeA],
+    ["font-size", "12px"],
+    ["font-weight", "900"],
+    ["user-select", "none"]
+  ]);
+  LikeButton.setAttribute("title", IsLiked ? "Unlike Chat" : "Like Chat");
+
+  var Heart = createElement(ChatID + "ChatLikeHeart", "span", LikeButton, [
+    ["position", "relative"],
+    ["font-size", "14px"],
+    ["line-height", "18px"],
+    ["color", ChatLikeColor(IsLiked)]
+  ]);
+  Heart.innerHTML = "&#9829;";
+
+  var Count = createElement(ChatID + "ChatLikeCount", "span", LikeButton, [
+    ["position", "relative"],
+    ["margin-left", "3px"],
+    ["line-height", "18px"],
+    ["color", ChatLikeColor(IsLiked)]
+  ]);
+  Count.textContent = Likes;
+
+  ChatMessage.setAttribute("ChatLikes", String(Likes));
+  ChatMessage.setAttribute("ChatIsLiked", IsLiked ? "true" : "false");
+
+  LikeButton.addEventListener("click", function (event) {
+    event.stopPropagation();
+    if (event.preventDefault != null) {
+      event.preventDefault();
+    }
+    if (UserID == null) {
+      ShowPopUp("It's Better Together", "Join the hangout today! You must <b>sign in</b> or <b>sign up</b> before being able to <b style='color: #FF5786'>Like</b> a chat!", [ ["Sign In", ThemeColor, "StartSignIn"], ["Sign Up", "#2AF5B5", "StartSignUp"], ["Later", "#B3B3B3", null] ]);
+      return;
+    }
+
+    var CurrentlyLiked = ChatMessage.getAttribute("ChatIsLiked") == "true";
+    var CurrentLikes = parseInt(ChatMessage.getAttribute("ChatLikes")) || 0;
+    LikeChat(ChatID, CurrentlyLiked);
+    UpdateChatLikeDisplay(ChatID, Math.max(0, CurrentLikes + (CurrentlyLiked ? -1 : 1)), !CurrentlyLiked);
+  });
+
+  return LikeButton;
+}
+
+function UpdateChatLikeDisplay(ChatID, Likes, IsLiked) {
+  var ChatMessage = find(ChatID + "Chat");
+  if (ChatMessage == null) {
+    return;
+  }
+
+  ChatMessage.setAttribute("ChatLikes", String(Likes));
+  if (IsLiked != null) {
+    ChatMessage.setAttribute("ChatIsLiked", IsLiked ? "true" : "false");
+  }
+  var NowLiked = ChatMessage.getAttribute("ChatIsLiked") == "true";
+  var Color = ChatLikeColor(NowLiked);
+
+  var Count = find(ChatID + "ChatLikeCount");
+  if (Count != null) {
+    Count.textContent = Likes;
+    Count.style.color = Color;
+  }
+  var Heart = find(ChatID + "ChatLikeHeart");
+  if (Heart != null) {
+    Heart.style.color = Color;
+  }
+  var LikeButton = find(ChatID + "ChatLike");
+  if (LikeButton != null) {
+    LikeButton.setAttribute("title", NowLiked ? "Unlike Chat" : "Like Chat");
+  }
+}
+
+function LikeChat(ChatID, IsLiking) {
+  var Task = (IsLiking == true) ? "UnlikeChat" : "LikeChat";
+  SendRequest(Task, { ChatID: ChatID }, function (Metadata, Body) {
+    if (Body != null && Body.Code == 200) {
+      UpdateChatLikeDisplay(ChatID, Body.Likes, Body.IsLiked);
+    }
+  });
+}
+
+function UpdateChatLikes(Metadata, Body) {
+  if (Body == null || Body.ChatID == null || Body.Likes == null) {
+    return;
+  }
+  // Only adopt the liked state when this packet describes our own action.
+  // (Body.UserID would be interpreted as the logged-in user by the packet handler.)
+  var IsLiked = null;
+  if (Body.LikedBy != null && Body.LikedBy == UserID) {
+    IsLiked = Body.IsLiked;
+  }
+  UpdateChatLikeDisplay(Body.ChatID, Body.Likes, IsLiked);
+}
+
 
 function SendChat(Data, PreviewExtras) {
   SendRequest("CreateChat", Data, function(Metadata, Body) {
@@ -1716,6 +1863,13 @@ function CreateNormalChat(Data, UserData, Holder, ReplyData) {
   ChatText.innerHTML = ChatText.innerHTML.replace(/\&nbsp;/g, " ").replace(/\$\[NEWLINE\]\;/g, "<br/>");
   ChatText.className = UserData.User + "ChatText";
 
+  // Only real Photop chats have a stable backend id to attach likes to.
+  ChatMessage.setAttribute("Source", Data.Source != null ? Data.Source : "");
+  if (Data.Source == null && Data._id != null && Data.Sending != true) {
+    setCSS(ChatText, "width", "calc(100% - 96px)");
+    CreateChatLikeButton(Data._id, ChatMessage, Data.Likes, Data.IsLiked == true);
+  }
+
   //ReadUser(Data.UserID, SetOnLoad);
   if (Data.Source == null) {
     ChatProfilePic.setAttribute("LoadUserID", Data.UserID);
@@ -1760,6 +1914,15 @@ function CreateMinifyChat(Data, UserData, Holder, PreviousChildDOMObject, ForceM
   }
 
   var ChatMessage = createElement(Data._id + "Chat", "div", Holder, SetBodyCSS);
+
+  // Keep identity on the DOM node: minified chats are also rebuilt from a sibling
+  // message, and the click dropdown needs UserID to decide who may delete the chat.
+  if (Data.UserID != null) {
+    ChatMessage.setAttribute("UserID", Data.UserID);
+  }
+  if (Data.Timestamp != null) {
+    ChatMessage.setAttribute("Timestamp", Data.Timestamp);
+  }
 
   if (Data.Timestamp != null) {
     var MiniTimestampTx = createElement("MiniTimestampTx", "div", ChatMessage, [
@@ -1838,6 +2001,13 @@ function CreateMinifyChat(Data, UserData, Holder, PreviousChildDOMObject, ForceM
   ChatText.innerHTML = ChatText.innerHTML.replace(/\&nbsp;/g, " ").replace(/\$\[NEWLINE\]\;/g, "<br/>");
   ChatText.className = UserData.User + "ChatText";
 
+  // Only real Photop chats have a stable backend id to attach likes to.
+  ChatMessage.setAttribute("Source", Data.Source != null ? Data.Source : "");
+  if (Data.Source == null && Data._id != null && Data.Sending != true) {
+    setCSS(ChatText, "width", "calc(100% - 96px)");
+    CreateChatLikeButton(Data._id, ChatMessage, Data.Likes, Data.IsLiked == true);
+  }
+
   if (Data.Source == null) {
     ChatMessage.setAttribute("onMouseOver", "ChatHoverDetector(this)");
     ChatMessage.setAttribute("onMouseOut", "ChatHoverOutDetector(this)");
@@ -1892,11 +2062,10 @@ function LiveChatDropdownData(Chat) {
       DropdownChatButtons.unshift(["Report", "#FFCB70", "ReportContent", { _id: Data._id, User: Data.User, PostID: Data.PostID }]);
     }
   }
-  if (UserID != Data.UserID || LoginUserRole.includes("Owner") == true) {
-    if (CheckPermision(LoginUserRole, "CanDeleteChats") == true) {
-      DropdownChatButtons.unshift(["Delete", "#FF5C5C", "ChatActions", ["Delete", Data._id, Data.User, Data.PostID]]);
-    }
+  if (UserID != null && (UserID == Data.UserID || CheckPermision(LoginUserRole, "CanDeleteChats") == true)) {
+    DropdownChatButtons.unshift(["Delete", "#FF5C5C", "ChatActions", ["Delete", Data._id, Data.User, Data.PostID]]);
   }
+  DropdownChatButtons.unshift(["Quote in New Post", "#C95EFF", "QuoteChatInNewPost", { _id: Data._id }]);
   if (UserID != null) {
     DropdownChatButtons.unshift(["Reply", "#2AF5B5", "ReplyChat", { _id: Data._id, User: Data.User }]);
   }
@@ -1998,7 +2167,7 @@ function RenderChatMessage(RequestedChats, Chats, Users, Replies, ClearHolder, F
 
               var SiblingChat = ChatMessage.nextSibling; //Holder.firstChild;
               if (i == Chats.length - 1 && SiblingChat != null && SiblingChat.getAttribute("UserID") == Data.UserID && SiblingChat.querySelector("#ChatProfilePic") != null && SiblingChat.querySelector("#ReplyHolder") == null) {
-                var FixedChat = CreateMinifyChat({ _id: SiblingChat.id.replace(/Chat/g, ""), UserID: SiblingChat.getAttribute("UserID"), Text: SiblingChat.querySelector("#ChatText").textContent, Timestamp: parseInt(SiblingChat.getAttribute("Timestamp")) }, UserData, Holder, ChatMessage);//, (Chats[i+1] != null && Chats[i+1].UserID == Data.UserID));
+                var FixedChat = CreateMinifyChat({ _id: SiblingChat.id.replace(/Chat/g, ""), UserID: SiblingChat.getAttribute("UserID"), Text: SiblingChat.querySelector("#ChatText").textContent, Timestamp: parseInt(SiblingChat.getAttribute("Timestamp")), Likes: parseInt(SiblingChat.getAttribute("ChatLikes")) || 0, IsLiked: SiblingChat.getAttribute("ChatIsLiked") == "true", Source: SiblingChat.getAttribute("Source") || undefined }, UserData, Holder, ChatMessage);//, (Chats[i+1] != null && Chats[i+1].UserID == Data.UserID));
                 Holder.insertBefore(FixedChat, SiblingChat);
                 SiblingChat.remove();
                 if (FixedChat.nextSibling != null && FixedChat.nextSibling.getAttribute("UserID") == Data.UserID) {
@@ -2053,7 +2222,7 @@ function RenderChatMessage(RequestedChats, Chats, Users, Replies, ClearHolder, F
 
               var SiblingChat = ChatMessage.nextSibling; //Holder.firstChild;
               if (i == Chats.length - 1 && SiblingChat != null && SiblingChat.getAttribute("UserID") == Data.UserID && SiblingChat.querySelector("#ChatProfilePic") != null && SiblingChat.querySelector("#ReplyHolder") == null) {
-                var FixedChat = CreateMinifyChat({ _id: SiblingChat.id.replace(/Chat/g, ""), UserID: SiblingChat.getAttribute("UserID"), Text: SiblingChat.querySelector("#ChatText").textContent, Timestamp: parseInt(SiblingChat.getAttribute("Timestamp")) }, UserData, Holder, ChatMessage);//, (Chats[i+1] != null && Chats[i+1].UserID == Data.UserID));
+                var FixedChat = CreateMinifyChat({ _id: SiblingChat.id.replace(/Chat/g, ""), UserID: SiblingChat.getAttribute("UserID"), Text: SiblingChat.querySelector("#ChatText").textContent, Timestamp: parseInt(SiblingChat.getAttribute("Timestamp")), Likes: parseInt(SiblingChat.getAttribute("ChatLikes")) || 0, IsLiked: SiblingChat.getAttribute("ChatIsLiked") == "true", Source: SiblingChat.getAttribute("Source") || undefined }, UserData, Holder, ChatMessage);//, (Chats[i+1] != null && Chats[i+1].UserID == Data.UserID));
                 Holder.insertBefore(FixedChat, SiblingChat);
                 SiblingChat.remove();
                 if (FixedChat.nextSibling != null && FixedChat.nextSibling.getAttribute("UserID") == Data.UserID) {
@@ -2219,6 +2388,50 @@ function NewChatDeleted(Metadata, Body) {
       }
     }
   }
+}
+
+async function NewPostDeleted(Metadata, Body) {
+  if (Body.PostIDs == null) {
+    return;
+  }
+  for (var i = 0; i < Body.PostIDs.length; i++) {
+    var PostID = Body.PostIDs[i];
+    if (PostID == null) {
+      continue;
+    }
+
+    // If the deleted post is open in the mobile full-screen view, close it first
+    // so the real post/chat elements return to their container before removal.
+    if (MobilePostView != null && MobilePostView.ID == PostID) {
+      await CloseMobileChat();
+    }
+
+    var PostObject = find(PostID);
+    if (PostObject != null) {
+      PostObject.remove();
+    }
+
+    delete LoadedPostData[PostID];
+    if (LoadedPostChats.includes(PostID)) {
+      LoadedPostChats = LoadedPostChats.filter(function (LoadedID) {
+        return LoadedID != PostID;
+      });
+    }
+    if (ActiveChatScrollListeners[PostID] != null) {
+      var Listener = ActiveChatScrollListeners[PostID];
+      if (Listener[0] != null && Listener[1] != null) {
+        Listener[0].removeEventListener("scroll", Listener[1]);
+      }
+      delete ActiveChatScrollListeners[PostID];
+    }
+    if (ProfileData.PinnedPost == PostID) {
+      delete ProfileData.PinnedPost;
+    }
+    if (CurrentActionSelectPost != null && CurrentActionSelectPost[1] == PostID) {
+      CurrentActionSelectPost = null;
+    }
+  }
+  SetupPostChats(false);
 }
 
 function ClearAttributes(ScrollFrame, IgnoreClearingDown) {
@@ -2801,6 +3014,65 @@ function ChatActions(Data) {
     ShowPopUp("Delete Chat?", "Are you sure you want to <b>delete</b> this chat?", [["Delete", "#FF4174", "FinishChatActionConfirm"], ["Cancel", "#B3B3B3", null]]);
   }
 }
+async function QuoteChatInNewPost(Data) {
+  Data = Data[3];
+  if (Data == null || Data._id == null) {
+    return;
+  }
+  if (UserID == null) {
+    ShowPopUp("It's Better Together", "Join the hangout today! You must <b>sign in</b> or <b>sign up</b> before being able to <b style='color: #C95EFF'>Quote</b> a chat!", [ ["Sign In", ThemeColor, "StartSignIn"], ["Sign Up", "#2AF5B5", "StartSignUp"], ["Later", "#B3B3B3", null] ]);
+    return;
+  }
+  // Leave the mobile full-screen post view before moving to the composer, so
+  // the post/chat elements are restored and the feed is no longer body-fixed.
+  if (MobilePostView != null) {
+    if (MobilePostView.Closing == true) {
+      await sleep(450);
+    } else {
+      await CloseMobileChat();
+    }
+  }
+  SwitchPage("Home");
+
+  function InsertChatQuote() {
+    var PostCreate = find("CreatePostTextHolder");
+    if (PostCreate == null) {
+      return;
+    }
+    var SearchAdd = "/Chat_" + Data._id;
+    if (PostCreate.textContent.includes(SearchAdd) == false) {
+      PostCreate.textContent = SearchAdd + " ";
+    }
+    // Force a format pass even if PreviousText happens to match the composer
+    // text (for example after a previous attempt inserted the token but could
+    // not style it). Without this RenderNewText() returns early and the token
+    // stays plain white.
+    PreviousText = null;
+    PostCreate.focus();
+    SetCursor(PostCreate, PostCreate.textContent.length);
+    if (PostCreate.textContent.length > 0) {
+      // A previously blurred empty composer keeps the placeholder color, which
+      // makes RenderNewText() clear the placeholder and return without styling.
+      setCSS(PostCreate, "color", FontColorA);
+      RenderNewText();
+    }
+    // RenderNewText rebuilds the composer nodes, so restore the caret and keep
+    // focus in the field after formatting.
+    SetCursor(PostCreate, PostCreate.textContent.length);
+    PostCreate.focus();
+
+    var Composer = find("CreatePost");
+    if (Composer != null) {
+      Composer.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  InsertChatQuote();
+  // Dropdown actions run on mousedown. Re-assert focus afterwards so the
+  // browser's default focus change cannot blur the composer on desktop.
+  setTimeout(InsertChatQuote, 0);
+}
+
 function ReplyChat(Data) {
   Data = Data[3];
   if (Data._id != null && Data.User != null) {
@@ -3363,6 +3635,117 @@ function DisplayNewPostMessage(Metadata, Body) {
   }
 }
 
+// Staff broadcasts -----------------------------------------------------------
+
+function AdminForceRefresh(Metadata, Body) {
+  if (Body == null) return;
+
+  if (Body.Mode == "Reload") {
+    // A staff member pushed an update that all clients must pick up now.
+    // Show a short blocking notice so nobody misses why the page reloads.
+    if (find("AdminUpdateOverlay") != null) return;
+    var UpdateOverlay = createElement("AdminUpdateOverlay", "div", "body", [
+      ["position", "fixed"],
+      ["left", "0px"],
+      ["top", "0px"],
+      ["z-index", "5000"],
+      ["width", "100%"],
+      ["height", "100%"],
+      ["display", "flex"],
+      ["align-items", "center"],
+      ["justify-content", "center"],
+      ["background-color", "rgba(0, 0, 0, 0.75)"],
+      ["font-size", "26px"],
+      ["font-family", FontTypeA],
+      ["font-weight", "900"],
+      ["color", "#ffffff"],
+      ["text-align", "center"],
+      ["padding", "20px"],
+      ["box-sizing", "border-box"]
+    ]);
+    UpdateOverlay.textContent = "Photop has been updated. Reloading…";
+    setTimeout(function () {
+      window.location.reload();
+    }, 1200);
+    return;
+  }
+
+  // Feed mode: pull the newest posts on the home feed.
+  if (CurrentPage == "Home" && typeof GetPosts == "function") {
+    GetPosts({
+      Add: "Top",
+      Limit: 15
+    });
+  }
+}
+
+function AdminAnnouncement(Metadata, Body) {
+  if (Body == null || Body.Message == null || String(Body.Message).length == 0) return;
+
+  var ExistingBanner = find("AdminAnnouncementBanner");
+  if (ExistingBanner != null) ExistingBanner.remove();
+
+  var LevelColors = { info: "#3D87FF", success: "#2F9E58", warning: "#E0A63A", alert: "#C0392B" };
+  var Color = LevelColors[String(Body.Level)] || LevelColors.info;
+
+  var Banner = createElement("AdminAnnouncementBanner", "div", "body", [
+    ["position", "fixed"],
+    ["top", "12px"],
+    ["left", "50%"],
+    ["transform", "translateX(-50%)"],
+    ["z-index", "1500"],
+    ["display", "flex"],
+    ["align-items", "center"],
+    ["box-sizing", "border-box"],
+    ["width", "calc(100% - 24px)"],
+    ["max-width", "620px"],
+    ["padding", "10px 12px"],
+    ["background-color", Color],
+    ["border-radius", "10px"],
+    ["box-shadow", "0 6px 20px 0 rgba(0, 0, 0, 0.35)"]
+  ]);
+
+  var BannerText = createElement("AdminAnnouncementText", "div", Banner, [
+    ["flex", "1"],
+    ["font-size", "17px"],
+    ["overflow-wrap", "break-word"],
+    ["white-space", "pre-wrap"],
+    ["font-family", FontTypeA],
+    ["font-weight", "900"],
+    ["color", "#ffffff"]
+  ]);
+  BannerText.textContent = String(Body.Message);
+
+  var BannerClose = createElement("AdminAnnouncementClose", "div", Banner, [
+    ["display", "flex"],
+    ["align-items", "center"],
+    ["justify-content", "center"],
+    ["width", "32px"],
+    ["height", "32px"],
+    ["margin-left", "10px"],
+    ["background-color", "rgba(0, 0, 0, 0.25)"],
+    ["border-radius", "8px"],
+    ["cursor", "pointer"],
+    ["font-size", "26px"],
+    ["font-family", FontTypeA],
+    ["font-weight", "900"],
+    ["color", "#ffffff"]
+  ]);
+  BannerClose.innerHTML = "&times;";
+  BannerClose.addEventListener("click", function () {
+    Banner.remove();
+  });
+}
+
+function AdminSessionRevoked(Metadata, Body) {
+  WebSocketDisabled = true;
+  ShowPopUp(
+    "Signed Out",
+    (Body && Body.Reason) || "An administrator signed out your session. Please sign in again.",
+    [["Okay", "#618BFF", "RefreshPage"]]
+  );
+}
+
 function ModerateUserAction(Task, Data) {
   SendRequest("ModerateUserAction", { Task: Task, Data: Data }, function (Metadata, Data) {
     if (Data.Code == 200) {
@@ -3379,19 +3762,38 @@ function AlertUserOfTor() {
 }
 
 var BanData = null;
-function UserBanDisplay(Metadata, Body) {
+function ShowBanNotice(BanInfo) {
   if (BanData != null) {
     return;
   }
   WebSocketDisabled = true;
-  BanData = Body;
+  BanData = BanInfo;
   loadScript(LoadScripts.BannedMessage);
+}
+
+function UserBanDisplay(Metadata, Body) {
+  if (BanData != null) {
+    return;
+  }
   //ShowPopUp("BANNED", "Thor has spoken. <img style='width: 100%' src='https://media.tenor.com/images/bc8ff9b0f2271982a4592c205c9084b6/tenor.gif'></img>", []);
+  ShowBanNotice(Body);
 }
 
 async function SendBanAppeal(Appeal) {
-  WebSocketDisabled = false;
   SubmittingAppeal = Appeal;
+  // The socket is often still open (banned users can sign in now), so send the
+  // appeal immediately instead of waiting for a reconnect that never happens.
+  if (Socket != null && Socket.readyState == Socket.OPEN) {
+    SendRequest("SendBanAppeal", { Appeal: Appeal }, function (Metadata, Data) {
+      if (Data.Code == 200) {
+        SubmittingAppeal = null;
+        WebSocketDisabled = true;
+        ShowPopUp("Appeal Submitted", "Successfully sent ban appeal.", [["Okay", "#618BFF", null]]);
+      }
+    });
+    return;
+  }
+  WebSocketDisabled = false;
   ConnectToBridge();
 }
 
@@ -3574,6 +3976,222 @@ async function GetBase64ImageData(BlobImage) {
 
 // MOVE LATER:
 var PrimaryObj = find("Primary");
+// ---- Mobile navigation helpers (visible buttons + gestures share these) ----
+// Full-screen post view (mobile): post card on top, live chat filling the rest.
+// The real post/button/chat elements are moved into the overlay (so likes, sending, etc. keep
+// working) and put back, with their original inline styles, when it closes.
+var MobilePostView = null;
+
+var MobileButtonRowStyle = { "position": "relative", "bottom": "auto", "width": "100%", "height": "20px", "flex": "0 0 auto", "margin": "8px 0px 12px 0px", "padding-top": "0px" };
+
+// Liking a post rebuilds its button row (inside the feed's post container). While that post is
+// open in the full-screen view, the rebuilt row has to land in the view instead.
+function MobilePostViewAdoptButtons(ID, Buttons) {
+  var View = MobilePostView;
+  if (View == null || View.ID != ID || View.Closing == true || Buttons == null || Buttons == View.Buttons) {
+    return;
+  }
+  var Top = find("MobilePostViewTop");
+  if (Top == null) {
+    return;
+  }
+  View.Buttons = Buttons;
+  MobileViewStyle(Buttons, MobileButtonRowStyle);
+  Top.appendChild(Buttons);
+}
+
+function MobileViewStyle(Element, Styles) {
+  if (Element == null || MobilePostView == null) {
+    return;
+  }
+  MobilePostView.Saved.push([Element, Element.getAttribute("style")]);
+  var Keys = Object.keys(Styles);
+  for (var i = 0; i < Keys.length; i++) {
+    Element.style.setProperty(Keys[i], Styles[Keys[i]]);
+  }
+}
+
+async function OpenMobileChat(PostID) {
+  var PostContainer = find(PostID);
+  var Chat = find(PostID + "LiveChat");
+  var Post = find(PostID + "Post");
+  var Buttons = find(PostID + "PostButtonHolder");
+  var Holder = find("LiveChatHolder");
+  var Nav = find("NavButtonHolder");
+  if (PostContainer == null || Chat == null || Post == null || Holder == null || MobilePostView != null || Holder.hasAttribute("Open") == true || (Nav != null && Nav.hasAttribute("Open") == true)) {
+    return;
+  }
+  ScrolledToMobile = window.scrollY;
+  MobilePostView = { ID: PostID, Container: PostContainer, Post: Post, Buttons: Buttons, Chat: Chat, Saved: [], Closing: false };
+  Holder.setAttribute("Open", "");
+
+  // Top bar with back button:
+  var Bar = createElement("MobilePostViewBar", "div", Holder, [
+    ["position", "relative"],
+    ["display", "flex"],
+    ["flex", "0 0 auto"],
+    ["align-items", "center"],
+    ["width", "100%"],
+    ["height", "48px"],
+    ["background-color", PageColor],
+    ["border-bottom", "1px solid " + BorderColor]
+  ]);
+  var BackButton = createElement("MobilePostViewBack", "div", Bar, [
+    ["position", "relative"],
+    ["display", "flex"],
+    ["align-items", "center"],
+    ["justify-content", "center"],
+    ["width", "52px"],
+    ["height", "100%"],
+    ["cursor", "pointer"]
+  ]);
+  BackButton.setAttribute("role", "button");
+  BackButton.setAttribute("aria-label", "Back to feed");
+  BackButton.setAttribute("title", "Back");
+  BackButton.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="' + FontColorA + '" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>';
+  BackButton.addEventListener("click", CloseMobileChat);
+  createElement("MobilePostViewTitle", "div", Bar, [
+    ["position", "relative"],
+    ["font-size", "20px"],
+    ["font-family", FontTypeA],
+    ["font-weight", "900"],
+    ["color", FontColorA],
+    ["user-select", "none"]
+  ]).textContent = "Post";
+
+  // Post card (scrolls if the post is long, never taking more than ~55% of the screen):
+  var Top = createElement("MobilePostViewTop", "div", Holder, [
+    ["position", "relative"],
+    ["display", "flex"],
+    ["flex-direction", "column"],
+    ["flex", "0 1 auto"],
+    ["max-height", "55%"],
+    ["margin", "8px 8px 0px 8px"],
+    ["background-color", ContentColor],
+    ["border-radius", "12px"],
+    ["overflow", "hidden"]
+  ]);
+  var Scroll = createElement("MobilePostViewScroll", "div", Top, [
+    ["position", "relative"],
+    ["flex", "1 1 auto"],
+    ["min-height", "0px"],
+    ["overflow-y", "auto"]
+  ]);
+  Scroll.className = "StandardScroll";
+
+  MobileViewStyle(Post, { "width": "100%", "min-height": "0px", "max-height": "none" });
+  MobileViewStyle(find(PostID + "Content"), { "max-height": "none", "overflow": "visible" });
+  MobileViewStyle(find(PostID + "TextHolder"), { "max-height": "none", "overflow": "visible" });
+  MobileViewStyle(Post.querySelector("#Spacer"), { "display": "none" });
+  Scroll.appendChild(Post);
+
+  if (Buttons != null) {
+    MobileViewStyle(Buttons, MobileButtonRowStyle);
+    Top.appendChild(Buttons);
+  }
+
+  // Live chat fills the remaining space:
+  MobileViewStyle(Chat, {
+    "position": "relative",
+    "display": "flex",
+    "flex": "1 1 0px",
+    "min-height": "0px",
+    "width": "calc(100% - 16px)",
+    "height": "auto",
+    "max-height": "none",
+    "margin": "8px 8px 8px 8px",
+    "left": "0px",
+    "top": "0px",
+    "right": "auto",
+    "border-radius": "12px"
+  });
+  Holder.appendChild(Chat);
+  var ChatContainer = Chat.querySelector("#Chat");
+  if (ChatContainer != null) {
+    ChatContainer.scrollTo(0, ChatContainer.scrollHeight);
+  }
+
+  Holder.style.left = "0%";
+  await sleep(400);
+
+  setCSS("Primary", "overflow", "hidden");
+  setCSS("body", "position", "fixed");
+}
+
+async function CloseMobileChat() {
+  var Holder = find("LiveChatHolder");
+  var View = MobilePostView;
+  if (Holder == null || View == null || View.Closing == true || Holder.hasAttribute("Open") == false) {
+    return;
+  }
+  View.Closing = true;
+  removeCSS("Primary", "overflow");
+  removeCSS("body", "position");
+  window.scrollTo({ top: ScrolledToMobile, left: 0, behavior: "auto" });
+
+  Holder.style.left = "110%";
+  await sleep(400);
+
+  // Put everything back where it came from, exactly as it was:
+  View.Container.insertBefore(View.Post, View.Container.firstChild);
+  if (View.Buttons != null) {
+    View.Container.appendChild(View.Buttons);
+  }
+  View.Container.appendChild(View.Chat);
+  for (var i = 0; i < View.Saved.length; i++) {
+    var Saved = View.Saved[i];
+    if (Saved[1] == null) {
+      Saved[0].removeAttribute("style");
+    } else {
+      Saved[0].setAttribute("style", Saved[1]);
+    }
+  }
+  var Leftovers = ["MobilePostViewBar", "MobilePostViewTop"];
+  for (var l = 0; l < Leftovers.length; l++) {
+    var Leftover = find(Leftovers[l]);
+    if (Leftover != null) {
+      Leftover.remove();
+    }
+  }
+  Holder.removeAttribute("Open");
+  MobilePostView = null;
+}
+
+async function OpenMobileNav() {
+  var Nav = find("NavButtonHolder");
+  var Holder = find("LiveChatHolder");
+  if (Nav == null || (Holder != null && Holder.hasAttribute("Open") == true)) {
+    return;
+  }
+  Nav.setAttribute("Open", "");
+  Nav.style.left = "0%";
+  var Backdrop = find("NavBackdrop");
+  if (Backdrop != null) {
+    Backdrop.style.display = "block";
+    await sleep(10);
+    Backdrop.style.opacity = "1";
+  }
+}
+
+async function CloseMobileNav() {
+  var Nav = find("NavButtonHolder");
+  if (Nav == null || Nav.hasAttribute("Open") == false) {
+    return;
+  }
+  Nav.style.left = "-110%";
+  var Backdrop = find("NavBackdrop");
+  if (Backdrop != null) {
+    Backdrop.style.opacity = "0";
+  }
+  await sleep(400);
+  if (Nav.style.left == "-110%") { // Not re-opened while closing.
+    Nav.removeAttribute("Open");
+    if (Backdrop != null) {
+      Backdrop.style.display = "none";
+    }
+  }
+}
+
 function CheckPrimarySize(Source) {
   if (PrimaryObj.clientWidth < 940) { // 1100
     setCSS(PrimaryObj, "left", "0%");
@@ -3607,41 +4225,41 @@ function CheckPrimarySize(Source) {
         ["z-index", "20"]
       ]);
 
+      MobileLiveChatHolder.style.height = "100dvh"; // Ignored where unsupported; keeps 100vh.
+      MobileLiveChatHolder.style.display = "flex";
+      MobileLiveChatHolder.style.flexDirection = "column";
+
       var swiper = new Swipe(MobileLiveChatHolder);
-      swiper.onRight(async function () {
-        //EnableScrolling();
-        removeCSS("Primary", "overflow");
-        removeCSS("body", "position");
-        //removeCSS("body", "scroll-behavior");
-        window.scrollTo({
-          top: ScrolledToMobile,
-          left: 0,
-          behavior: "auto"
-        });
-
-        MobileLiveChatHolder.style.left = "110%";
-        await sleep(400);
-
-        MobileLiveChatHolder.removeAttribute("Open");
-
-        var Chat = MobileLiveChatHolder.firstChild;
-        setCSS(Chat, "display", "none");
-
-        find(Chat.id.replace(/LiveChat/g, "")).appendChild(Chat);
-      });
+      swiper.onRight(CloseMobileChat);
       swiper.run();
+
+      var NavBackdrop = createElement("NavBackdrop", "div", "body", [
+        ["position", "fixed"],
+        ["display", "none"],
+        ["top", "0px"],
+        ["left", "0px"],
+        ["width", "100%"],
+        ["height", "100%"],
+        ["background-color", "rgba(0, 0, 0, 0.55)"],
+        ["opacity", "0"],
+        ["transition", "opacity 0.4s ease 0s"],
+        ["z-index", "19"]
+      ]);
+      NavBackdrop.addEventListener("click", CloseMobileNav);
 
       var NavButtonHolder = createElement("NavButtonHolder", "div", "body", [
         ["position", "fixed"],
-        //["display", "none"],
         ["top", "0px"],
-        ["width", "60%"],
+        ["width", "80%"],
+        ["max-width", "320px"],
         ["height", "100vh"],
-        ["left", "-70%"],
+        ["left", "-110%"],
         ["transition", "all 0.4s ease 0s"],
         ["background-color", PageColor],
+        ["overflow-y", "auto"],
         ["z-index", "20"]
       ]);
+      NavButtonHolder.style.height = "100dvh"; // Ignored where unsupported; keeps 100vh.
 
       var SideBarHolder = find("SideBarHolder");
 
@@ -3652,20 +4270,48 @@ function CheckPrimarySize(Source) {
 
       NavButtonHolder.appendChild(SideBarHolder);
 
+      // Always-visible top bar so the menu doesn't depend on discovering a swipe gesture.
+      var MobileTopBar = createElement("MobileTopBar", "div", "body", [
+        ["position", "fixed"],
+        ["display", "flex"],
+        ["align-items", "center"],
+        ["top", "0px"],
+        ["left", "0px"],
+        ["width", "100%"],
+        ["height", "48px"],
+        ["background-color", PageColor],
+        ["border-bottom", "1px solid " + BorderColor],
+        ["z-index", "15"]
+      ]);
+      var MenuButton = createElement("MobileMenuButton", "div", MobileTopBar, [
+        ["position", "relative"],
+        ["display", "flex"],
+        ["align-items", "center"],
+        ["justify-content", "center"],
+        ["width", "52px"],
+        ["height", "100%"],
+        ["cursor", "pointer"]
+      ]);
+      MenuButton.setAttribute("role", "button");
+      MenuButton.setAttribute("aria-label", "Open menu");
+      MenuButton.setAttribute("title", "Menu");
+      MenuButton.innerHTML = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="' + ThemeColor + '" stroke-width="2.4" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>';
+      MenuButton.addEventListener("click", OpenMobileNav);
+      createElement("MobileTopBarTitle", "div", MobileTopBar, [
+        ["position", "relative"],
+        ["font-size", "22px"],
+        ["font-family", FontTypeA],
+        ["font-weight", "900"],
+        ["color", ThemeColor],
+        ["user-select", "none"]
+      ]).textContent = "Photop";
+      setCSS("MainContent", "margin-top", "56px"); // Clear the fixed top bar.
+
       var swiper = new Swipe("body");
-      swiper.onRight(async function () {
-        if (find("LiveChatHolder").hasAttribute("Open") == false) {
-          NavButtonHolder.setAttribute("Open", "");
-          NavButtonHolder.style.left = "0%";
-        }
-      });
+      swiper.onRight(OpenMobileNav);
       swiper.run();
       var swiper = new Swipe("body");
-      swiper.onLeft(async function () {
-        NavButtonHolder.style.left = "-70%";
-        await sleep(400);
-        NavButtonHolder.removeAttribute("Open");
-      });
+      swiper.onLeft(CloseMobileNav);
       swiper.run();
 
       if (Source == "Event") {

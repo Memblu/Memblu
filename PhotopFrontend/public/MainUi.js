@@ -464,9 +464,7 @@ function CreateSideButton(ID, Text, Title, SVG) {
 async function MobileCloseNavButtons() {
   var NavButtonHolder = find("NavButtonHolder");
   if (NavButtonHolder != null && NavButtonHolder.hasAttribute("Open") == true) {
-    NavButtonHolder.style.left = "-70%";
-    await sleep(400);
-    NavButtonHolder.removeAttribute("Open");
+    CloseMobileNav();
   }
 }
 
@@ -510,6 +508,17 @@ SettingsButton.onclick = function () {
   LoadScriptMetadata = null;
   loadScript(LoadScripts.Settings);
   SetPageTitle("Settings");
+  MobileCloseNavButtons();
+}
+
+var AdminPanelButton = CreateSideButton("AdminPanelButton", "Admin", "Open Admin Panel", '<svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg"> <path d="M128 14L28 56V124C28 178 70 228 128 244C186 228 228 178 228 124V56L128 14Z" stroke="' + ThemeColor + '" stroke-width="18"/> <path d="M88 122L116 150L170 96" stroke="' + ThemeColor + '" stroke-width="18"/> </svg>');
+setCSS(AdminPanelButton, "display", "none");
+AdminPanelButton.onclick = function () {
+  if (HasAdminAccess(LoginUserRole) != true) {
+    ShowPopUp("Staff Only", "You do not have permission to open the admin panel.", [["Okay", "#618BFF", null]]);
+  } else {
+    loadScript(LoadScripts.Admin);
+  }
   MobileCloseNavButtons();
 }
 
@@ -823,18 +832,7 @@ var CurrentPage = "Home";
 var SwitchTimeout = 0;
 
 async function CloseMobileLiveChat() {
-  var MobileLiveChatHolder = find("LiveChatHolder");
-  if (MobileLiveChatHolder != null && MobileLiveChatHolder.hasAttribute("Open") == true) {
-    removeCSS("body", "position");
-    removeCSS("Primary", "overflow");
-    window.scrollTo(0, ScrolledToMobile);
-
-    MobileLiveChatHolder.style.left = "110%";
-    await sleep(400);
-
-    MobileLiveChatHolder.removeAttribute("Open");
-    MobileLiveChatHolder.firstChild.remove();
-  }
+  await CloseMobileChat();
 }
 
 async function SwitchPage(Page, BypassCurrent) {

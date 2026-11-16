@@ -69,6 +69,8 @@ npm run admin stats
 npm run admin unban <Username>
 ```
 
+Owners and Moderators also get an **Admin** button in the sidebar. The panel covers platform statistics, user search and management (roles, bans, disabling, session revocation, content purges), post/chat moderation, the report queue, ban appeals, active sessions, staff broadcasts and the audit log. Management actions (roles, bans/disabled accounts, appeal approvals) are restricted to Owners, while Moderators can moderate content and dismiss reports.
+
 ### 3. Run Automated Integration Tests
 
 ```bash
@@ -76,7 +78,7 @@ cd ~/PhotopRevival/PhotopBackend
 npm test
 ```
 
-Verifies all 11 core subsystems:
+Verifies all core subsystems:
 - WebSocket handshake & `CreateConnection`
 - Account registration & login sessions
 - Post creation & feed querying
@@ -84,6 +86,7 @@ Verifies all 11 core subsystems:
 - Per-post live chat rooms & realtime messaging
 - Profile viewing
 - Multipart image uploads & static media serving
+- Admin panel: access control, overview stats, user browsing/roles, bans and appeals, content moderation, reports, sessions, broadcasts and the audit log
 
 ### 4. Custom Domain / Public Dev Testing
 

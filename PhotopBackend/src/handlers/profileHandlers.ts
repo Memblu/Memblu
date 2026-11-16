@@ -1,5 +1,7 @@
 import { db } from "../db.js";
 import { UserRecord, PostRecord, ChatRecord, LikeRecord } from "../types.js";
+import { handleGetPosts } from "./postHandlers.js";
+import { formatChatResponse } from "./chatHandlers.js";
 
 export function handleGetProfile(body: any, currentUser: UserRecord | null): any {
   const { ProfileUserID } = body;
@@ -21,6 +23,19 @@ export function handleGetProfile(body: any, currentUser: UserRecord | null): any
     isFollowing = !!follow;
   }
 
+  // The client renders all three profile tabs (Posts, Chats, Likes) from this one response,
+  // so it has to carry the first page of each. Later pages come from GetPosts/GetProfileChats/
+  // GetProfileLikes via infinite scroll.
+  const postsPage = handleGetPosts({ FromUserID: ProfileUserID, Amount: 15 }, currentUser);
+  const chatsPage = handleGetProfileChats({ GetUserID: ProfileUserID, Amount: 25 }, currentUser);
+  const likesPage = handleGetProfileLikes({ GetUserID: ProfileUserID, Amount: 15 }, currentUser);
+
+  // "Likes" marks which posts the *viewer* has liked, across both the Posts and Likes tabs.
+  const viewerLikes = new Map<string, { _id: string }>();
+  for (const l of [...(postsPage.Likes || []), ...(likesPage.Likes || [])]) {
+    viewerLikes.set(l._id, l);
+  }
+
   return {
     Code: 200,
     UserInfo: {
@@ -32,7 +47,14 @@ export function handleGetProfile(body: any, currentUser: UserRecord | null): any
       ProfileData: JSON.parse(target.profile_data || "{}"),
       SetLocation: target.set_location || null
     },
-    IsFollowing: isFollowing
+    IsFollowing: isFollowing,
+    Posts: postsPage.Posts || [],
+    Chats: chatsPage.Chats || [],
+    Replies: chatsPage.Replies || [],
+    LikePostData: likesPage.LikePostData || [],
+    UserLikePosts: likesPage.Posts || [],
+    UserLikePostUsers: likesPage.Users || [],
+    Likes: Array.from(viewerLikes.values())
   };
 }
 
@@ -224,7 +246,7 @@ export function handleGetProfileLikes(body: any, currentUser: UserRecord | null)
   };
 }
 
-export function handleGetProfileChats(body: any): any {
+export function handleGetProfileChats(body: any, currentUser: UserRecord | null = null): any {
   const { GetUserID, Amount = 15, Before } = body;
   if (!GetUserID) return { Code: 400 };
 
@@ -240,32 +262,12 @@ export function handleGetProfileChats(body: any): any {
     SELECT * FROM chats WHERE ${conditions.join(" AND ")} ORDER BY timestamp DESC LIMIT ?
   `).all(...params, limit) as unknown as ChatRecord[];
 
-  const replyIds = Array.from(new Set(chatRows.filter(c => c.reply_id).map(c => c.reply_id!)));
-  const replies: any[] = [];
-  if (replyIds.length > 0) {
-    const placeholders = replyIds.map(() => "?").join(",");
-    const rRows = db.prepare(`SELECT id, user_id, text, timestamp FROM chats WHERE id IN (${placeholders})`).all(...replyIds) as any[];
-    for (const r of rRows) {
-      replies.push({
-        _id: r.id,
-        UserID: r.user_id,
-        Text: r.text,
-        Timestamp: r.timestamp
-      });
-    }
-  }
+  const formatted = formatChatResponse(chatRows, currentUser);
 
   return {
     Code: 200,
-    Chats: chatRows.map(c => ({
-      _id: c.id,
-      PostID: c.post_id,
-      UserID: c.user_id,
-      Text: c.text,
-      Timestamp: c.timestamp,
-      ReplyID: c.reply_id || undefined
-    })),
-    Replies: replies
+    Chats: formatted.Chats,
+    Replies: formatted.Replies
   };
 }
 
