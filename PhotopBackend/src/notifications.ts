@@ -478,8 +478,8 @@ function notificationText(row: NotificationRecord): { title: string; body: strin
       body = count > 1 ? `${countLabel(count)} quoted your post` : `${actor} quoted your post`;
       break;
     case "ChatPost":
-      title = actor;
-      body = preview ? preview : `${actor} chatted on your post`;
+      title = "New reply";
+      body = preview ? `${actor} replied to your post: "${preview}"` : `${actor} replied to your post`;
       break;
     case "ModeratePost":
       title = "Post moderated";

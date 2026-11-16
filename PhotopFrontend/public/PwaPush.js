@@ -4,7 +4,7 @@
 var PwaInstallPromptEvent = null;
 var PwaPromptVisible = false;
 var PwaSetupStarted = false;
-var PwaPromptSeenKey = "PwaInstallPromptSeen";
+var PwaPromptSeenKey = "PwaInstallPromptSeenV2";
 
 window.addEventListener("beforeinstallprompt", function (event) {
   event.preventDefault();
@@ -200,6 +200,7 @@ function PwaPlatformContent(Platform) {
 }
 
 function MarkPwaPromptSeen() {
+  return; // The install prompt now shows on every launch; nothing is remembered.
   try {
     window.localStorage.setItem(PwaPromptSeenKey, "true");
   } catch (e) { }
@@ -213,6 +214,7 @@ function MarkPwaPromptSeen() {
 }
 
 function PwaServerSaysSeen() {
+  return false; // Ignore the old per-account "seen" flag.
   try {
     return typeof Settings !== "undefined" && Settings != null && Settings.Notifications != null && Settings.Notifications.InstallPromptSeen === true;
   } catch (e) {
@@ -402,7 +404,7 @@ function ShowPwaInstallPrompt(Platform) {
     ["color", FontColorA],
     ["text-align", "center"]
   ]);
-  DismissButton.textContent = "Don't show again";
+  DismissButton.textContent = "Not now";
   DismissButton.addEventListener("click", function () {
     MarkPwaPromptSeen();
     ClosePwaInstallPrompt();
@@ -604,4 +606,261 @@ async function DisablePushNotifications(Callback) {
     console.error("Push unsubscribe failed", e);
     Done(false);
   }
+}
+
+/* ── One-time push permission prompt ──────────────────────────────────────── */
+
+var PushPromptSeenKey = "PushPermissionPromptSeen";
+var PushPromptScheduled = false;
+var PushPromptVisible = false;
+
+function PushPromptWasSeen() {
+  try {
+    return window.localStorage.getItem(PushPromptSeenKey) == "true";
+  } catch (e) {
+    return false;
+  }
+}
+
+function PushPromptMarkSeen() {
+  try {
+    window.localStorage.setItem(PushPromptSeenKey, "true");
+  } catch (e) { }
+}
+
+function ClosePushPrompt() {
+  var Prompt = document.getElementById("PushPermissionPrompt");
+  if (Prompt != null) {
+    Prompt.remove();
+  }
+  PushPromptVisible = false;
+}
+
+function PushPromptEligible() {
+  // Shown on every launch while eligible, so there is no "already seen" check here.
+  if (!PushIsSupported() || !PushGetPublicKey()) {
+    return false;
+  }
+  // iOS can only do push once installed to the Home Screen; the install prompt covers that.
+  if (PwaIsEmbeddedWebview() || PushIosNeedsInstall()) {
+    return false;
+  }
+  // Already granted or blocked: nothing to ask.
+  if (Notification.permission != "default") {
+    return false;
+  }
+  if (typeof UserID === "undefined" || UserID == null) {
+    return false;
+  }
+  return true;
+}
+
+function ShowPushPrompt() {
+  if (PushPromptVisible) {
+    return;
+  }
+  PushPromptVisible = true;
+  // Shown on every launch while the device is eligible; nothing is remembered.
+
+  var Card = createElement("PushPermissionPrompt", "div", "body", [
+    ["position", "fixed"],
+    ["right", "12px"],
+    ["bottom", "calc(12px + env(safe-area-inset-bottom, 0px))"],
+    ["width", "calc(100% - 24px)"],
+    ["max-width", "460px"],
+    ["z-index", "1000"],
+    ["background-color", LeftSidebarColor],
+    ["border-radius", "20px"],
+    ["padding", "24px"],
+    ["box-sizing", "border-box"],
+    ["box-shadow", "0px 4px 24px rgba(0, 0, 0, 0.45)"]
+  ]);
+
+  createElement("PushPermissionTitle", "div", Card, [
+    ["position", "relative"],
+    ["font-size", "28px"],
+    ["font-family", FontTypeA],
+    ["font-weight", "900"],
+    ["color", FontColorA],
+    ["text-align", "left"]
+  ]).textContent = "Turn on notifications?";
+
+  createElement("PushPermissionIntro", "div", Card, [
+    ["position", "relative"],
+    ["margin-top", "8px"],
+    ["font-size", "19px"],
+    ["line-height", "27px"],
+    ["font-family", FontTypeA],
+    ["font-weight", "600"],
+    ["color", "#bbbbbb"],
+    ["text-align", "left"]
+  ]).textContent = "Get notified about likes, replies and new followers, even when Memblu isn't open.";
+
+  var Buttons = createElement("PushPermissionButtons", "div", Card, [
+    ["position", "relative"],
+    ["display", "flex"],
+    ["gap", "12px"],
+    ["margin-top", "22px"]
+  ]);
+
+  var EnableButton = createElement("PushPermissionEnable", "div", Buttons, [
+    ["position", "relative"],
+    ["flex", "1 1 auto"],
+    ["padding", "15px 18px"],
+    ["background-color", ThemeColor],
+    ["border-radius", "12px"],
+    ["cursor", "pointer"],
+    ["font-size", "20px"],
+    ["font-family", FontTypeA],
+    ["font-weight", "900"],
+    ["color", "#ffffff"],
+    ["text-align", "center"]
+  ]);
+  EnableButton.textContent = "Enable";
+  EnableButton.addEventListener("click", function () {
+    EnableButton.textContent = "Working...";
+    // Runs inside this click, so the browser allows the permission dialog.
+    EnablePushNotifications(function (Success, Reason) {
+      ClosePushPrompt();
+      if (!Success && Reason == "denied" && typeof ShowPopUp === "function") {
+        ShowPopUp("Push blocked", "Notifications are blocked in your browser. Re-enable them in your browser settings to receive push notifications.", [["OK", ThemeColor, null]]);
+      }
+    });
+  });
+
+  var LaterButton = createElement("PushPermissionLater", "div", Buttons, [
+    ["position", "relative"],
+    ["flex", "1 1 auto"],
+    ["padding", "15px 18px"],
+    ["background-color", ContentColorLayer3],
+    ["border-radius", "12px"],
+    ["cursor", "pointer"],
+    ["font-size", "20px"],
+    ["font-family", FontTypeA],
+    ["font-weight", "900"],
+    ["color", FontColorA],
+    ["text-align", "center"]
+  ]);
+  LaterButton.textContent = "Not now";
+  LaterButton.addEventListener("click", ClosePushPrompt);
+}
+
+// Called after sign-in (AuthUpdate). Safe to call repeatedly.
+function SetupPushPermissionPrompt() {
+  if (PushPromptScheduled || !PushPromptEligible()) {
+    return;
+  }
+  PushPromptScheduled = true;
+  var Attempts = 0;
+
+  function Attempt() {
+    Attempts++;
+    if (!PushPromptEligible()) {
+      return;
+    }
+    // Don't stack on the install prompt or fire while the tab is in the background.
+    if (PwaPromptVisible || document.hidden) {
+      if (Attempts < 8) {
+        setTimeout(Attempt, 6000);
+      }
+      return;
+    }
+    PushGetSubscription().then(function (Existing) {
+      if (Existing == null) {
+        ShowPushPrompt();
+      }
+    });
+  }
+  setTimeout(Attempt, 5000);
+}
+
+/* ── Push prompt diagnostics: open the site with ?pushdebug=1 ─────────────── */
+
+var PushDebugRequested = false;
+try { PushDebugRequested = /[?&]pushdebug(=|&|$)/.test(window.location.search); } catch (e) { }
+var PushPromptTrace = [];
+
+(function () {
+  var OriginalSetup = SetupPushPermissionPrompt;
+  SetupPushPermissionPrompt = function () {
+    PushPromptTrace.push("SetupPushPermissionPrompt called (eligible=" + PushPromptEligible() + ", alreadyScheduled=" + PushPromptScheduled + ")");
+    return OriginalSetup.apply(this, arguments);
+  };
+  var OriginalShow = ShowPushPrompt;
+  ShowPushPrompt = function () {
+    PushPromptTrace.push("ShowPushPrompt called");
+    return OriginalShow.apply(this, arguments);
+  };
+})();
+
+async function PushPromptDiagnosticText() {
+  var Lines = [];
+  var SignedIn = typeof UserID !== "undefined" && UserID != null;
+  var Sub = null;
+  try { Sub = await PushGetSubscription(); } catch (e) { }
+  Lines.push("new code loaded: yes");
+  Lines.push("secure context (https): " + window.isSecureContext);
+  Lines.push("push supported by browser: " + PushIsSupported());
+  Lines.push("server VAPID key present: " + !!PushGetPublicKey());
+  Lines.push("notification permission: " + (typeof Notification !== "undefined" ? Notification.permission : "n/a"));
+  Lines.push("already seen flag: " + PushPromptWasSeen());
+  Lines.push("signed in: " + SignedIn);
+  Lines.push("iOS needs install: " + PushIosNeedsInstall());
+  Lines.push("looks like in-app webview: " + PwaIsEmbeddedWebview());
+  Lines.push("install prompt open: " + PwaPromptVisible);
+  Lines.push("existing push subscription: " + (Sub != null));
+  Lines.push("tab hidden: " + document.hidden);
+  Lines.push("setup scheduled: " + PushPromptScheduled);
+  Lines.push("verdict: " + (PushPromptEligible() ? "ELIGIBLE (card should appear ~5s after sign-in)" : (PushPromptWasSeen() ? "NOT eligible: prompt was already shown on this browser (flag set)" : "NOT eligible (see the false/blocked line above)")));
+  Lines.push("--- events ---");
+  Lines.push(PushPromptTrace.length ? PushPromptTrace.join("\n") : "(none yet)");
+  Lines.push("--- user agent ---");
+  Lines.push(navigator.userAgent);
+  return Lines.join("\n");
+}
+
+function ShowPushDiagnosticOverlay() {
+  if (document.getElementById("PushDebugOverlay") != null) {
+    return;
+  }
+  var Box = document.createElement("div");
+  Box.id = "PushDebugOverlay";
+  Box.style.cssText = "position:fixed;top:8px;left:8px;right:8px;max-height:70vh;overflow:auto;z-index:100000;background:rgba(0,0,0,0.92);color:#fff;font:12px/16px monospace;padding:10px;border-radius:10px;white-space:pre-wrap;box-sizing:border-box;";
+  var Text = document.createElement("div");
+  var Row = document.createElement("div");
+  Row.style.cssText = "margin-top:8px;display:flex;gap:8px;";
+  function Btn(Label, Fn) {
+    var B = document.createElement("button");
+    B.textContent = Label;
+    B.style.cssText = "padding:6px 10px;font:12px monospace;cursor:pointer;";
+    B.addEventListener("click", Fn);
+    Row.appendChild(B);
+  }
+  Btn("Force-show the prompt card", function () {
+    try { window.localStorage.removeItem(PushPromptSeenKey); } catch (e) { }
+    PushPromptVisible = false;
+    ShowPushPrompt();
+  });
+  Btn("Reset flag + re-run setup", function () {
+    try { window.localStorage.removeItem(PushPromptSeenKey); } catch (e) { }
+    PushPromptScheduled = false;
+    SetupPushPermissionPrompt();
+  });
+  Btn("Close", function () { Box.remove(); });
+  Box.appendChild(Text);
+  Box.appendChild(Row);
+  document.body.appendChild(Box);
+  async function Refresh() {
+    if (document.getElementById("PushDebugOverlay") == null) {
+      return;
+    }
+    try { Text.textContent = await PushPromptDiagnosticText(); } catch (e) { Text.textContent = "diagnostic error: " + e; }
+    setTimeout(Refresh, 2000);
+  }
+  Refresh();
+}
+
+if (PushDebugRequested) {
+  // Wait for sign-in and the 5s prompt delay so the events list is meaningful.
+  setTimeout(ShowPushDiagnosticOverlay, 8000);
 }

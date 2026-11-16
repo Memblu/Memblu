@@ -162,6 +162,7 @@ function ConnectToBridge() {
   // AwaitingResponse = [];
 
   Socket.onopen = async function() {
+    ReportVisibility();
     if (SubmittingAppeal != null) {
       SendRequest("SendBanAppeal", { Appeal: SubmittingAppeal }, function (Metadata, Data) {
         if (Data.Code == 200) {
@@ -236,9 +237,17 @@ function ConnectToBridge() {
 
   // Tell the server whether this client is actually visible so backgrounded
   // tabs do not suppress push notifications.
-  function ReportVisibility() {
+  function ReportVisibility(Event) {
     if (Socket != null && Socket.readyState === Socket.OPEN) {
-      SendRequest("UpdateVisibility", { Visible: !document.hidden }, function () { });
+      var Visible = !document.hidden;
+      // On mobile, a tab only counts as "being used" when it is visible AND focused.
+      if (Visible && DeviceIsMobile() && typeof document.hasFocus == "function") {
+        Visible = document.hasFocus();
+      }
+      if (Event && Event.type == "pagehide") {
+        Visible = false;
+      }
+      SendRequest("UpdateVisibility", { Visible: Visible }, function () { });
     }
   }
   if (typeof document !== "undefined") {
@@ -246,6 +255,9 @@ function ConnectToBridge() {
     window.addEventListener("focus", ReportVisibility);
     window.addEventListener("blur", ReportVisibility);
     window.addEventListener("pagehide", ReportVisibility);
+    window.addEventListener("pageshow", ReportVisibility);
+    // The server expires "active" after 45s without a signal, so keep it fresh.
+    setInterval(ReportVisibility, 20000);
   }
 
   /*
@@ -397,6 +409,9 @@ function AuthUpdate(IsAuth) {
     }
     if (typeof SetupPwaInstallPrompt == "function") {
       SetupPwaInstallPrompt();
+    }
+    if (typeof SetupPushPermissionPrompt == "function") {
+      SetupPushPermissionPrompt();
     }
     find("CreatePostUser").textContent = Username;
     find("CreatePostUser").setAttribute("title", "Signed In as " + Username);

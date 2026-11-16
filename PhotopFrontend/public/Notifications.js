@@ -41,7 +41,7 @@ function NotificationText(Notification) {
     case "LikeChat": return { Title: "New like", Body: Name + " liked your message.", Icon: "Like" };
     case "QuotePost": return { Title: "New quote", Body: Name + " quoted your post.", Icon: "Quote" };
     case "QuoteChat": return { Title: "New quote", Body: Name + " quoted your message.", Icon: "Quote" };
-    case "ChatPost": return { Title: Name, Body: (Notification.Preview || (Name + " replied to your post.")), Icon: "Chat" };
+    case "ChatPost": return { Title: "New reply", Body: (Notification.Preview ? (Name + " replied to your post: \"" + Notification.Preview + "\"") : (Name + " replied to your post.")), Icon: "Chat" };
     case "ReplyChat": return { Title: Name, Body: (Notification.Preview ? `Replied to you: "${Notification.Preview}"` : `Replied to you: ${Name}`), Icon: "Chat" };
     case "MentionPost": return { Title: "New mention", Body: Name + " mentioned you in a post.", Icon: "Mention" };
     case "MentionChat": return { Title: Name, Body: (Notification.Preview || (Name + " mentioned you in a chat.")), Icon: "Mention" };
