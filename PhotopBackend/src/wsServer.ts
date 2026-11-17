@@ -519,7 +519,7 @@ export function createWebSocketServer(server: any) {
             result = handleGetProfile(Body, currentUser);
             break;
           case "GetUserInfo":
-            result = handleGetUserInfo(Body);
+            result = handleGetUserInfo(Body, currentUser);
             break;
           case "FollowUser":
             result = handleFollowUser(Body, currentUser);
@@ -528,7 +528,7 @@ export function createWebSocketServer(server: any) {
             result = handleUnfollowUser(Body, currentUser);
             break;
           case "GetFollowData":
-            result = handleGetFollowData(Body);
+            result = handleGetFollowData(Body, currentUser);
             break;
           case "GetProfileLikes":
             result = handleGetProfileLikes(Body, currentUser);

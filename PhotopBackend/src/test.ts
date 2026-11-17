@@ -868,6 +868,128 @@ async function runTests() {
   assert.strictEqual(removedNotif, undefined, "The grouped notification should be removed after the last unlike");
   console.log("✔ Notifications verified");
 
+  // 27. Follow state: every surface that renders a Follow/Unfollow button must be told
+  // whether the *viewer* follows each user (hover preview, Followers/Following lists).
+  const f1 = await sendReq("FollowUser", { FollowUserID: moderator.id }, owner.token, owner.id);
+  assert.strictEqual(f1.Code, 200, "Owner should be able to follow the moderator");
+  const f2 = await sendReq("FollowUser", { FollowUserID: moderator.id }, token, userId);
+  assert.strictEqual(f2.Code, 200, "Base user should be able to follow the moderator");
+  const f3 = await sendReq("FollowUser", { FollowUserID: owner.id }, token, userId);
+  assert.strictEqual(f3.Code, 200, "Base user should be able to follow the owner");
+
+  // Hover preview (GetUserInfo)
+  const previewFollowing = await sendReq("GetUserInfo", { GetUserID: moderator.id }, owner.token, owner.id);
+  assert.strictEqual(previewFollowing.IsFollowing, true, "GetUserInfo should report IsFollowing=true for a followed user");
+  const previewNotFollowing = await sendReq("GetUserInfo", { GetUserID: owner.id }, moderator.token, moderator.id);
+  assert.strictEqual(previewNotFollowing.IsFollowing, false, "GetUserInfo should report IsFollowing=false for an unfollowed user");
+  const previewAnon = await sendReq("GetUserInfo", { GetUserID: moderator.id });
+  assert.strictEqual(previewAnon.IsFollowing, false, "GetUserInfo should report IsFollowing=false for logged-out viewers");
+  const previewSelf = await sendReq("GetUserInfo", { GetUserID: owner.id }, owner.token, owner.id);
+  assert.strictEqual(previewSelf.IsFollowing, false, "GetUserInfo should never report following yourself");
+
+  // Followers / Following lists (GetFollowData): state is relative to the viewer, not the list owner.
+  const listAsBase = await sendReq("GetFollowData", { Type: "Followers", GetUserID: moderator.id, Amount: 25 }, token, userId);
+  assert.strictEqual(listAsBase.Code, 200, "GetFollowData should return 200");
+  assert.strictEqual(listAsBase.Users[owner.id].IsFollowing, true, "Base user follows the owner, so the list should say so");
+  assert.strictEqual(listAsBase.Users[userId].IsFollowing, false, "A viewer's own tile should not be marked followed");
+  const listAsOwner = await sendReq("GetFollowData", { Type: "Followers", GetUserID: moderator.id, Amount: 25 }, owner.token, owner.id);
+  assert.strictEqual(listAsOwner.Users[userId].IsFollowing, false, "Owner does not follow the base user, even though the base user follows the owner");
+  const followingList = await sendReq("GetFollowData", { Type: "Following", GetUserID: userId, Amount: 25 }, owner.token, owner.id);
+  assert.strictEqual(followingList.Users[moderator.id].IsFollowing, true, "Following list should reflect the viewer's follow of each entry");
+  const listAnon = await sendReq("GetFollowData", { Type: "Followers", GetUserID: moderator.id, Amount: 25 });
+  assert.strictEqual(listAnon.Users[owner.id].IsFollowing, false, "Logged-out viewers should see IsFollowing=false");
+
+  // Unfollowing flips every surface back.
+  const uf = await sendReq("UnfollowUser", { UnfollowUserID: moderator.id }, owner.token, owner.id);
+  assert.strictEqual(uf.Code, 200, "Owner should be able to unfollow the moderator");
+  const afterUnfollow = await sendReq("GetUserInfo", { GetUserID: moderator.id }, owner.token, owner.id);
+  assert.strictEqual(afterUnfollow.IsFollowing, false, "GetUserInfo should reflect an unfollow");
+  const afterUnfollowList = await sendReq("GetFollowData", { Type: "Followers", GetUserID: moderator.id, Amount: 25 }, owner.token, owner.id);
+  assert.strictEqual(afterUnfollowList.Users[userId].IsFollowing, false, "List should still be viewer-relative after an unfollow");
+  console.log("✔ Follow state in GetUserInfo / GetFollowData verified");
+
+  // 28. Removing content removes the notifications it caused, right away.
+  const notifsOf = async (u: { token: string; id: string }): Promise<any[]> => {
+    const res = await sendReq("GetNotifications", { Amount: 50 }, u.token, u.id);
+    assert.strictEqual(res.Code, 200, "GetNotifications should return 200");
+    return res.Notifications;
+  };
+  const base = { token, id: userId };
+  const findChat = async (postID: string, text: string, u: { token: string; id: string }) => {
+    const res = await sendReq("GetChats", { Post: postID, Amount: 25 }, u.token, u.id);
+    const chat = res.Chats.find((c: any) => c.Text === text);
+    assert.ok(chat, "Chat should be retrievable");
+    return chat._id as string;
+  };
+
+  // 28a. Deleting a post drops likes, replies and "new post" notices for it. A
+  // grouped "new post" notice shrinks and re-points to the author's newest live post.
+  const rmPost1 = (await sendReq("CreatePost", { Text: "Removal test post one", Media: [] }, owner.token, owner.id)).NewPostID;
+  const rmPost2 = (await sendReq("CreatePost", { Text: "Removal test post two", Media: [] }, owner.token, owner.id)).NewPostID;
+  assert.strictEqual((await sendReq("LikePost", { PostID: rmPost1 }, moderator.token, moderator.id)).Code, 200);
+  assert.strictEqual((await sendReq("CreateChat", { PostID: rmPost1, Text: "Chat on removal post" }, moderator.token, moderator.id)).Code, 200);
+
+  let ownerNotifs = await notifsOf(owner);
+  assert.ok(ownerNotifs.some(n => n.Type === "LikePost" && n.PostID === rmPost1), "Owner should be notified of the like");
+  assert.ok(ownerNotifs.some(n => n.Type === "ChatPost" && n.PostID === rmPost1), "Owner should be notified of the chat");
+  let baseNotifs = await notifsOf(base);
+  const newPostNotif = baseNotifs.find(n => n.Type === "NewPost" && n.ActorID === owner.id);
+  assert.ok(newPostNotif, "A follower should be notified of new posts");
+  assert.strictEqual(newPostNotif.PostID, rmPost2, "New-post notice should point at the newest post");
+  assert.strictEqual(newPostNotif.Count, 2, "New-post notice should group both posts");
+
+  assert.strictEqual((await sendReq("UpdatePost", { Task: "Delete", PostID: rmPost2 }, owner.token, owner.id)).Code, 200);
+  baseNotifs = await notifsOf(base);
+  const shrunk = baseNotifs.find(n => n.Type === "NewPost" && n.ActorID === owner.id);
+  assert.ok(shrunk, "New-post notice should survive while another post is live");
+  assert.strictEqual(shrunk.Count, 1, "New-post notice should shrink when a post is deleted");
+  assert.strictEqual(shrunk.PostID, rmPost1, "New-post notice should re-point at the newest live post");
+
+  assert.strictEqual((await sendReq("UpdatePost", { Task: "Delete", PostID: rmPost1 }, owner.token, owner.id)).Code, 200);
+  ownerNotifs = await notifsOf(owner);
+  assert.ok(!ownerNotifs.some(n => n.PostID === rmPost1), "Deleting a post should remove every notification about it");
+  baseNotifs = await notifsOf(base);
+  assert.ok(!baseNotifs.some(n => n.Type === "NewPost" && n.ActorID === owner.id), "Last new-post notice should be dropped with its post");
+
+  // 28b. Hiding a chat drops the reply notice and likes on that chat.
+  const rmPost3 = (await sendReq("CreatePost", { Text: "Chat removal test post", Media: [] }, owner.token, owner.id)).NewPostID;
+  assert.strictEqual((await sendReq("CreateChat", { PostID: rmPost3, Text: "Chat that will be removed" }, base.token, base.id)).Code, 200);
+  const rmChatID = await findChat(rmPost3, "Chat that will be removed", base);
+  assert.strictEqual((await sendReq("LikeChat", { ChatID: rmChatID }, moderator.token, moderator.id)).Code, 200);
+  ownerNotifs = await notifsOf(owner);
+  assert.ok(ownerNotifs.some(n => n.Type === "ChatPost" && n.ChatID === rmChatID), "Post author should be notified of the chat");
+  baseNotifs = await notifsOf(base);
+  assert.ok(baseNotifs.some(n => n.Type === "LikeChat" && n.ChatID === rmChatID), "Chat author should be notified of the like");
+
+  assert.strictEqual((await sendReq("UpdateChat", { ChatID: rmChatID, UpdateValues: [["Hidden", ""]] }, base.token, base.id)).Code, 200);
+  ownerNotifs = await notifsOf(owner);
+  assert.ok(!ownerNotifs.some(n => n.ChatID === rmChatID), "Removing a chat should remove the post author's notification");
+  baseNotifs = await notifsOf(base);
+  assert.ok(!baseNotifs.some(n => n.ChatID === rmChatID), "Removing a chat should remove the likes on it");
+
+  // 28c. Quoting: removing the quoting post retracts the quote notification.
+  const quotedPost = (await sendReq("CreatePost", { Text: "Post that gets quoted", Media: [] }, owner.token, owner.id)).NewPostID;
+  const quoter = await sendReq("CreatePost", { Text: `Quoting this /Post_${quotedPost}`, Media: [] }, base.token, base.id);
+  assert.strictEqual(quoter.Code, 200, "Quoting post should be created");
+  ownerNotifs = await notifsOf(owner);
+  assert.ok(ownerNotifs.some(n => n.Type === "QuotePost" && n.PostID === quotedPost), "Quoted author should be notified");
+  assert.strictEqual((await sendReq("UpdatePost", { Task: "Delete", PostID: quoter.NewPostID }, base.token, base.id)).Code, 200);
+  ownerNotifs = await notifsOf(owner);
+  assert.ok(!ownerNotifs.some(n => n.Type === "QuotePost" && n.PostID === quotedPost), "Deleting the quoting post should retract the quote notification");
+
+  // 28d. A moderator removing a post drops its like notifications but keeps the
+  // moderation notice, which exists precisely because the post was removed.
+  const modPost = (await sendReq("CreatePost", { Text: "Post that staff will remove", Media: [] }, moderator.token, moderator.id)).NewPostID;
+  assert.strictEqual((await sendReq("LikePost", { PostID: modPost }, base.token, base.id)).Code, 200);
+  let modNotifs = await notifsOf(moderator);
+  assert.ok(modNotifs.some(n => n.Type === "LikePost" && n.PostID === modPost), "Author should be notified of the like");
+  const staffDelete = await sendReq("AdminContentAction", { Task: "Delete", Type: "Post", ID: modPost, Reason: "Test removal" }, owner.token, owner.id);
+  assert.strictEqual(staffDelete.Code, 200, "Staff should be able to remove the post");
+  modNotifs = await notifsOf(moderator);
+  assert.ok(!modNotifs.some(n => n.Type === "LikePost" && n.PostID === modPost), "Like notification should go when staff remove the post");
+  assert.ok(modNotifs.some(n => n.Type === "ModeratePost" && n.PostID === modPost), "The moderation notice must be kept");
+  console.log("✔ Notifications removed with their posts and chats");
+
   ws.close();
   cleanupTestData();
   console.log("\n==============================================");

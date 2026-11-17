@@ -1,7 +1,7 @@
 import { db } from "../db.js";
 import { generateId } from "../auth.js";
 import { UserRecord } from "../types.js";
-import { notifyContentModerated } from "../notifications.js";
+import { notifyContentModerated, removeNotificationsForChat, removeNotificationsForContent, removeNotificationsForPost } from "../notifications.js";
 
 const VALID_ROLES = [
   "Owner",
@@ -132,6 +132,7 @@ function deleteContentByType(type: string, id: string): { DeletedPostIDs?: strin
       db.prepare("UPDATE posts SET deleted = 1 WHERE id = ?").run(id);
       db.prepare("UPDATE users SET profile_data = replace(profile_data, ?, '') WHERE profile_data LIKE ?")
         .run(`"PinnedPost":"${id}"`, `%"PinnedPost":"${id}"%`);
+      removeNotificationsForPost(id);
     }
     return { DeletedPostIDs: [id] };
   }
@@ -141,6 +142,7 @@ function deleteContentByType(type: string, id: string): { DeletedPostIDs?: strin
     if (chat.hidden !== 1) {
       db.prepare("UPDATE chats SET hidden = 1 WHERE id = ?").run(id);
       db.prepare("UPDATE posts SET chats = MAX(0, chats - 1) WHERE id = ?").run(chat.post_id);
+      removeNotificationsForChat(id);
     }
     return { DeletedChatIDs: [id] };
   }
@@ -489,6 +491,7 @@ export function handleAdminUpdateUser(body: any, currentUser: UserRecord | null)
       db.prepare("UPDATE posts SET deleted = 1 WHERE user_id = ?").run(target.id);
       db.prepare("UPDATE chats SET hidden = 1 WHERE user_id = ?").run(target.id);
       db.prepare("UPDATE users SET profile_data = replace(profile_data, '\"PinnedPost\"', '\"PinnedPostRemoved\"') WHERE id = ?").run(target.id);
+      removeNotificationsForContent({ postIds: deletedPostIDs, chatIds: deletedChatIDs });
     }
 
     logAdminAction(currentUser, "UserBanned", target.user, {
@@ -544,6 +547,7 @@ export function handleAdminUpdateUser(body: any, currentUser: UserRecord | null)
     db.prepare("UPDATE posts SET deleted = 1 WHERE user_id = ?").run(target.id);
     db.prepare("UPDATE chats SET hidden = 1 WHERE user_id = ?").run(target.id);
     db.prepare("UPDATE users SET profile_data = replace(profile_data, '\"PinnedPost\"', '\"PinnedPostRemoved\"') WHERE id = ?").run(target.id);
+    removeNotificationsForContent({ postIds: deletedPostIDs, chatIds: deletedChatIDs });
     logAdminAction(currentUser, "ContentPurged", target.user, {
       Posts: deletedPostIDs.length,
       Chats: deletedChatIDs.length

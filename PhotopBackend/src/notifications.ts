@@ -325,15 +325,12 @@ export function createNotification(input: CreateNotificationInput): Notification
   return row;
 }
 
-// Un-liking a post or chat must remove that actor from the grouped entry and
-// drop the notification entirely once nobody is left.
-export function removeNotificationActor(recipientId: string, type: NotificationType, groupKey: string, actorId: string): void {
-  const row = db.prepare(
-    "SELECT * FROM notifications WHERE recipient_id = ? AND type = ? AND group_key = ?"
-  ).get(recipientId, type, groupKey) as NotificationRecord | undefined;
-  if (!row) return;
-
-  const actors = (parseJson(row.actors, []) as string[]).filter(id => id && id !== actorId);
+// Removes one event (and, optionally, one actor) from a grouped notification and
+// drops the row entirely once nothing is left. Shared by un-likes and by the
+// removal of the content that triggered a notification.
+function retractFromRow(row: NotificationRecord, actorId: string, dropActor: boolean): void {
+  const recipientId = row.recipient_id;
+  const actors = (parseJson(row.actors, []) as string[]).filter(id => id && (!dropActor || id !== actorId));
   const count = Math.max(0, (row.count || 1) - 1);
 
   if (count <= 0) {
@@ -348,6 +345,143 @@ export function removeNotificationActor(recipientId: string, type: NotificationT
   const updated = db.prepare("SELECT * FROM notifications WHERE id = ?").get(row.id) as unknown as NotificationRecord;
   const users = loadUsers([updated.actor_id || "", ...actors]);
   broadcastNotification(recipientId, formatNotification(updated, users), getUnreadCount(recipientId));
+}
+
+// Un-liking a post or chat must remove that actor from the grouped entry and
+// drop the notification entirely once nobody is left.
+export function removeNotificationActor(recipientId: string, type: NotificationType, groupKey: string, actorId: string): void {
+  const row = db.prepare(
+    "SELECT * FROM notifications WHERE recipient_id = ? AND type = ? AND group_key = ?"
+  ).get(recipientId, type, groupKey) as NotificationRecord | undefined;
+  if (!row) return;
+  retractFromRow(row, actorId, true);
+}
+
+// ── Removing content ────────────────────────────────────────────────────────
+// When a post or chat is deleted or hidden, notifications that point at it (or
+// were caused by it) are deleted right away and a "Removed" packet is pushed so
+// open clients drop them live. Moderation notices are the exception: they exist
+// *because* content was removed, so they outlive it.
+
+const MODERATION_TYPES: NotificationType[] = ["ModeratePost", "ModerateChat"];
+
+function dropNotificationRows(rows: NotificationRecord[]): void {
+  if (rows.length === 0) return;
+  const del = db.prepare("DELETE FROM notifications WHERE id = ?");
+  for (const row of rows) del.run(row.id);
+  for (const row of rows) {
+    broadcastNotification(row.recipient_id, { _id: row.id, Removed: true }, getUnreadCount(row.recipient_id));
+  }
+}
+
+// Notifications that point at a post or chat which no longer exists. The
+// optional type filter keeps callers from sweeping up moderation notices.
+function dropNotificationsPointingAt(column: "post_id" | "chat_id", id: string, exceptTypes: NotificationType[]): void {
+  const skip = exceptTypes.map(() => "?").join(",");
+  const rows = db.prepare(
+    `SELECT * FROM notifications WHERE ${column} = ? AND type NOT IN (${skip})`
+  ).all(id, ...exceptTypes) as unknown as NotificationRecord[];
+  dropNotificationRows(rows);
+}
+
+// Does this actor still have live content (post or chat) quoting the given item?
+function actorStillQuotes(actorId: string, prefix: "Post" | "Chat", refId: string): boolean {
+  const needle = `/${prefix}_${refId}`;
+  const inPost = db.prepare(
+    "SELECT 1 FROM posts WHERE user_id = ? AND deleted = 0 AND instr(text, ?) > 0 LIMIT 1"
+  ).get(actorId, needle);
+  if (inPost) return true;
+  const inChat = db.prepare(
+    "SELECT 1 FROM chats WHERE user_id = ? AND hidden = 0 AND instr(text, ?) > 0 LIMIT 1"
+  ).get(actorId, needle);
+  return !!inChat;
+}
+
+// Takes one event by this actor out of a grouped notification. Only touches rows
+// that actually counted the actor, so an unrelated notification is never shrunk.
+function retractGroupedEvent(type: NotificationType, groupKey: string, actorId: string, dropActor: boolean): void {
+  const rows = db.prepare(
+    "SELECT * FROM notifications WHERE type = ? AND group_key = ?"
+  ).all(type, groupKey) as unknown as NotificationRecord[];
+  for (const row of rows) {
+    const actors = parseJson(row.actors, []) as string[];
+    if (!Array.isArray(actors) || !actors.includes(actorId)) continue;
+    retractFromRow(row, actorId, dropActor);
+  }
+}
+
+// Quote notifications point at the *quoted* item, so removing the quoting content
+// has to retract its author from those groups.
+function retractQuotesMadeBy(actorId: string, text: string): void {
+  for (const refId of extractReferenceIds(text, "Post")) {
+    retractGroupedEvent("QuotePost", `post:${refId}:quote`, actorId, !actorStillQuotes(actorId, "Post", refId));
+  }
+  for (const refId of extractReferenceIds(text, "Chat")) {
+    retractGroupedEvent("QuoteChat", `chat:${refId}:quote`, actorId, !actorStillQuotes(actorId, "Chat", refId));
+  }
+}
+
+// Call after the post has been marked deleted.
+export function removeNotificationsForPost(postId: string): void {
+  const post = db.prepare("SELECT id, user_id, text FROM posts WHERE id = ?").get(postId) as
+    { id: string; user_id: string; text: string } | undefined;
+  if (!post) return;
+
+  // Likes, replies, mentions, quotes and thread activity on the post, plus anything
+  // about the chats inside it. "NewPost" is a per-author group handled below.
+  dropNotificationsPointingAt("post_id", postId, [...MODERATION_TYPES, "NewPost"]);
+
+  // "X posted something new" links to the newest post of the group. If that post
+  // is gone, shrink the group and re-point it at the author's latest live post.
+  const newPostRows = db.prepare(
+    "SELECT * FROM notifications WHERE type = 'NewPost' AND post_id = ?"
+  ).all(postId) as unknown as NotificationRecord[];
+  for (const row of newPostRows) {
+    if ((row.count || 1) <= 1) {
+      dropNotificationRows([row]);
+      continue;
+    }
+    const latest = db.prepare(
+      "SELECT id FROM posts WHERE user_id = ? AND deleted = 0 ORDER BY timestamp DESC LIMIT 1"
+    ).get(post.user_id) as { id: string } | undefined;
+    if (!latest) {
+      dropNotificationRows([row]);
+      continue;
+    }
+    db.prepare("UPDATE notifications SET count = ?, post_id = ?, updated_at = ? WHERE id = ?")
+      .run((row.count || 1) - 1, latest.id, Date.now(), row.id);
+    const updated = db.prepare("SELECT * FROM notifications WHERE id = ?").get(row.id) as unknown as NotificationRecord;
+    const users = loadUsers([updated.actor_id || "", ...(parseJson(updated.actors, []) as string[])]);
+    broadcastNotification(row.recipient_id, formatNotification(updated, users), getUnreadCount(row.recipient_id));
+  }
+
+  retractQuotesMadeBy(post.user_id, post.text || "");
+}
+
+// Call after the chat has been hidden.
+export function removeNotificationsForChat(chatId: string): void {
+  const chat = db.prepare("SELECT id, post_id, user_id, text FROM chats WHERE id = ?").get(chatId) as
+    { id: string; post_id: string; user_id: string; text: string } | undefined;
+  if (!chat) return;
+
+  // Likes, mentions, quotes and the "replied to your post" notice for this chat.
+  dropNotificationsPointingAt("chat_id", chatId, MODERATION_TYPES);
+
+  // "Chatted on a post you're in" is grouped per post: take this chat out of it,
+  // and the author too unless they still have another live chat on the post.
+  const otherChat = db.prepare(
+    "SELECT 1 FROM chats WHERE post_id = ? AND user_id = ? AND hidden = 0 AND id != ? LIMIT 1"
+  ).get(chat.post_id, chat.user_id, chatId);
+  retractGroupedEvent("ThreadActivity", `post:${chat.post_id}:thread`, chat.user_id, !otherChat);
+
+  retractQuotesMadeBy(chat.user_id, chat.text || "");
+}
+
+// For bulk removals (account termination, content purge). Capture the ids before
+// marking the content removed, then call this once it has been.
+export function removeNotificationsForContent(input: { postIds?: string[]; chatIds?: string[] }): void {
+  for (const id of input.chatIds || []) removeNotificationsForChat(id);
+  for (const id of input.postIds || []) removeNotificationsForPost(id);
 }
 
 export function getNotifications(

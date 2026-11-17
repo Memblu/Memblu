@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { generateId } from "../auth.js";
 import { UserRecord } from "../types.js";
+import { removeNotificationsForContent } from "../notifications.js";
 
 export function handleModerateUserAction(
   body: any,
@@ -34,8 +35,11 @@ export function handleModerateUserAction(
     `).run(JSON.stringify(banInfo), target.id);
 
     if (Data.TerminateAccount) {
+      const postIds = (db.prepare("SELECT id FROM posts WHERE user_id = ? AND deleted = 0").all(target.id) as any[]).map(row => row.id);
+      const chatIds = (db.prepare("SELECT id FROM chats WHERE user_id = ? AND hidden = 0").all(target.id) as any[]).map(row => row.id);
       db.prepare("UPDATE posts SET deleted = 1 WHERE user_id = ?").run(target.id);
       db.prepare("UPDATE chats SET hidden = 1 WHERE user_id = ?").run(target.id);
+      removeNotificationsForContent({ postIds, chatIds });
     }
 
     pushBanToUser(target.id, banInfo);

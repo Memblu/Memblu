@@ -1,7 +1,7 @@
 import { db } from "../db.js";
 import { generateId } from "../auth.js";
 import { UserRecord, PostRecord } from "../types.js";
-import { notifyPostCreated, notifyPostLiked, notifyPostUnliked } from "../notifications.js";
+import { notifyPostCreated, notifyPostLiked, notifyPostUnliked, removeNotificationsForPost } from "../notifications.js";
 
 export function handleGetPosts(body: any, currentUser: UserRecord | null): any {
   const { LookupID, Amount = 15, Before, FromUserID, ExcludePinned } = body;
@@ -226,6 +226,7 @@ export function handleUpdatePost(
     }
     db.prepare("UPDATE posts SET deleted = 1 WHERE id = ?").run(PostID);
     db.prepare("UPDATE users SET profile_data = replace(profile_data, ?, '') WHERE profile_data LIKE ?").run(`"PinnedPost":"${PostID}"`, `%"PinnedPost":"${PostID}"%`);
+    removeNotificationsForPost(PostID);
     if (broadcastDeletedPost) {
       broadcastDeletedPost(PostID);
     }

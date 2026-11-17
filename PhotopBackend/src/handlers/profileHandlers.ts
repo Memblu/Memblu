@@ -68,15 +68,24 @@ export function handleGetProfile(body: any, currentUser: UserRecord | null): any
   };
 }
 
-export function handleGetUserInfo(body: any): any {
+export function handleGetUserInfo(body: any, currentUser: UserRecord | null = null): any {
   const { GetUserID } = body;
   if (!GetUserID) return { Code: 404 };
 
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(GetUserID) as UserRecord | undefined;
   if (!user) return { Code: 404 };
 
+  // The hover preview renders its Follow/Unfollow button from this response, so it
+  // has to carry the viewer's real follow state (GetProfile already does).
+  let isFollowing = false;
+  if (currentUser && currentUser.id !== user.id) {
+    const follow = db.prepare("SELECT 1 FROM follows WHERE follower_id = ? AND target_id = ?").get(currentUser.id, user.id);
+    isFollowing = !!follow;
+  }
+
   return {
     Code: 200,
+    IsFollowing: isFollowing,
     UserInfo: {
       _id: user.id,
       User: user.user,
@@ -141,7 +150,7 @@ export function handleUnfollowUser(body: any, currentUser: UserRecord | null): a
   return { Code: 200 };
 }
 
-export function handleGetFollowData(body: any): any {
+export function handleGetFollowData(body: any, currentUser: UserRecord | null = null): any {
   const { Type, GetUserID, Amount = 25, Before } = body;
   if (!GetUserID || !Type) return { Code: 400 };
 
@@ -172,11 +181,23 @@ export function handleGetFollowData(body: any): any {
   if (followIds.length > 0) {
     const placeholders = followIds.map(() => "?").join(",");
     const userRows = db.prepare(`SELECT id, user, role, settings FROM users WHERE id IN (${placeholders})`).all(...followIds) as any[];
+
+    // Which of these users does the *viewer* follow? (Not the owner of the list: on
+    // someone else's Followers/Following list the buttons reflect the viewer's follows.)
+    const viewerFollows = new Set<string>();
+    if (currentUser) {
+      const followedRows = db.prepare(
+        `SELECT target_id FROM follows WHERE follower_id = ? AND target_id IN (${placeholders})`
+      ).all(currentUser.id, ...followIds) as { target_id: string }[];
+      for (const r of followedRows) viewerFollows.add(r.target_id);
+    }
+
     for (const u of userRows) {
       usersObj[u.id] = {
         User: u.user,
         Role: u.role,
-        Settings: JSON.parse(u.settings || "{}")
+        Settings: JSON.parse(u.settings || "{}"),
+        IsFollowing: viewerFollows.has(u.id)
       };
     }
   }

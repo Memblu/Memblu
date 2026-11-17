@@ -1,7 +1,7 @@
 import { db } from "../db.js";
 import { generateId } from "../auth.js";
 import { UserRecord, ChatRecord } from "../types.js";
-import { notifyChatCreated, notifyChatLiked, notifyChatUnliked } from "../notifications.js";
+import { notifyChatCreated, notifyChatLiked, notifyChatUnliked, removeNotificationsForChat } from "../notifications.js";
 
 export function handleConnectLiveChat(
   body: any,
@@ -177,6 +177,7 @@ export function handleUpdateChat(
 
   db.prepare("UPDATE chats SET hidden = 1 WHERE id = ?").run(ChatID);
   db.prepare("UPDATE posts SET chats = MAX(0, chats - 1) WHERE id = ?").run(chat.post_id);
+  removeNotificationsForChat(ChatID);
 
   broadcastDeleted(chat.post_id, ChatID);
 
